@@ -1,0 +1,237 @@
+import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
+
+// Runs against the production build, so these also cover the bundled simulation worker.
+let errors: string[] = [];
+test.beforeEach(async ({ page }) => {
+  errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+});
+test.afterEach(() => { expect(errors).toEqual([]); });
+
+const status = (page: Page) => page.getByRole('region', { name: 'Status simulasi' });
+const timer = (page: Page) => status(page).locator('.timer');
+const primary = (page: Page) => page.locator('#primary-action');
+const metric = (page: Page, label: string) => page.locator('.metric').filter({ has: page.locator('dt', { hasText: new RegExp(`^${label}$`) }) }).first().locator('.metric-value');
+
+async function open(page: Page) {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Lewati' }).click();
+}
+
+async function setField(page: Page, label: string, value: string) {
+  const field = page.getByRole('textbox', { name: label, exact: true });
+  await field.fill(value);
+  await field.press('Enter');
+}
+
+// ST-01 fixture through the UI: c=1, λ=0, service 10 s, 1 minute, three customers at 00:00.
+async function st01(page: Page) {
+  await open(page);
+  await page.getByRole('button', { name: 'Kurangi jumlah loket' }).click();
+  await setField(page, 'Kedatangan otomatis', '0');
+  await setField(page, 'Minimum', '10');
+  await setField(page, 'Maksimum', '10');
+  await setField(page, 'Durasi', '1');
+  await page.locator('#entry-count').fill('3');
+  await page.getByRole('button', { name: 'Tambah jadwal' }).click();
+}
+
+test('UF-01 opens a ready preset without login or camera, with skippable help', async ({ page }) => {
+  await page.goto('/');
+  await expect(page).toHaveTitle('TomorrowLab — Laboratorium skenario');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'id');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Jam makan siang');
+  await expect(status(page)).toContainText('Siap dijalankan');
+  await expect(timer(page)).toHaveText('00:00');
+  for (const [label, value] of [['Loket aktif', '2'], ['Kedatangan otomatis', '4'], ['Minimum', '20'], ['Maksimum', '40'], ['Durasi', '15'], ['Seed', '2026']]) {
+    await expect(page.getByRole('textbox', { name: label, exact: true })).toHaveValue(value);
+  }
+  await expect(page.getByRole('radio', { name: '20×' })).toBeChecked();
+  await expect(page.getByText('Permintaan otomatis menyamai atau melebihi kapasitas rata-rata (ρ = 1,00)', { exact: false })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Mulai mencoba' }).click();
+  await expect(page.getByRole('heading', { name: 'Mulai dalam tiga langkah' })).toHaveCount(0);
+  await expect(primary(page)).toBeFocused();
+  await page.getByRole('button', { name: 'Bantuan' }).click();
+  await expect(page.getByRole('heading', { name: 'Mulai dalam tiga langkah' })).toBeFocused();
+
+  await page.getByRole('button', { name: 'Asumsi model' }).first().click();
+  const dialog = page.getByRole('dialog', { name: 'Asumsi model' });
+  await expect(dialog).toContainText('FIFO');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Asumsi model' }).first()).toBeFocused();
+});
+
+test('UF-04 keyboard run, contextual Space pause/resume and focus kept on the toggled button', async ({ page }) => {
+  await open(page);
+  await primary(page).focus();
+  await page.keyboard.press('Enter');
+  await expect(status(page)).toContainText('Berjalan');
+  await expect(page.getByRole('textbox', { name: 'Loket aktif', exact: true })).toBeDisabled();
+  await expect.poll(async () => timer(page).textContent()).not.toBe('00:00');
+
+  await page.locator('#workspace-title').focus();
+  await page.keyboard.press(' ');
+  await expect(status(page)).toContainText('Dijeda');
+  const paused = await timer(page).textContent();
+  await page.waitForTimeout(400);
+  await expect(timer(page)).toHaveText(paused!);
+  await page.keyboard.press(' ');
+  await expect(status(page)).toContainText('Berjalan');
+
+  // Space on the button itself activates it once; the workspace shortcut must not toggle a second time.
+  await primary(page).focus();
+  await page.keyboard.press(' ');
+  await expect(status(page)).toContainText('Dijeda');
+  await expect(primary(page)).toHaveText('Lanjutkan');
+  await expect(primary(page)).toBeFocused();
+
+  await page.getByRole('radio', { name: '1×' }).check();
+  await expect(page.getByRole('radio', { name: '1×' })).toBeChecked();
+});
+
+test('UF-02 rejects invalid input without clamping and focuses the first error on Jalankan', async ({ page }) => {
+  await open(page);
+  await setField(page, 'Maksimum', '10');
+  const max = page.getByRole('textbox', { name: 'Maksimum', exact: true });
+  await expect(page.getByText('Waktu maksimum harus ≥ minimum.')).toBeVisible();
+  await expect(max).toHaveAttribute('aria-invalid', 'true');
+  await setField(page, 'Seed', '1.000');
+  await expect(page.getByText('Seed harus bilangan bulat 0–4294967295.')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Seed', exact: true })).toHaveValue('1.000');
+
+  await primary(page).click();
+  await expect(max).toBeFocused();
+  await expect(status(page)).toContainText('Siap dijalankan');
+
+  await setField(page, 'Kedatangan otomatis', '1.5');
+  await expect(page.getByRole('textbox', { name: 'Kedatangan otomatis', exact: true })).toHaveValue('1,5');
+  for (let index = 0; index < 4; index++) await page.getByRole('button', { name: 'Tambah loket' }).click();
+  await expect(page.getByRole('textbox', { name: 'Loket aktif', exact: true })).toHaveValue('6');
+  await expect(page.getByRole('button', { name: 'Tambah loket' })).toBeDisabled();
+  await expect(page.getByText('Maksimum 6 loket.')).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Status loket' }).getByRole('listitem')).toHaveCount(6);
+});
+
+test('ST-01 through the UI: scheduled customers, fast finish, final metrics, replay and reset', async ({ page }) => {
+  await st01(page);
+  await expect(page.getByText('3 pelanggan dalam 1 jadwal.')).toBeVisible();
+  await expect(page.getByText('Tidak ada pelanggan terjadwal.')).toHaveCount(0);
+  await primary(page).click();
+  await expect(status(page)).toContainText('Berjalan');
+  await page.getByRole('button', { name: 'Selesaikan cepat' }).click();
+  await expect(status(page)).toContainText('Selesai · hasil final');
+  await expect(metric(page, 'Rata-rata tunggu')).toHaveText('10,00 detik');
+  await expect(metric(page, 'P95 tunggu')).toHaveText('20,00 detik');
+  await expect(metric(page, 'Rata-rata waktu di sistem')).toHaveText('20,00 detik');
+  await expect(metric(page, 'Utilisasi agregat')).toHaveText('50,0%');
+  await expect(metric(page, 'Throughput')).toHaveText('3,00 /menit');
+  await expect(metric(page, 'Antrean maksimum')).toHaveText('2');
+  await expect(metric(page, 'Durasi penyelesaian')).toHaveText('0,00 detik');
+
+  await expect(primary(page)).toHaveText('Ulangi run yang sama');
+  await primary(page).click();
+  await expect(status(page)).toContainText('Berjalan');
+  await page.getByRole('button', { name: 'Selesaikan cepat' }).click();
+  await expect(status(page)).toContainText('Selesai · hasil final');
+  await expect(metric(page, 'Rata-rata tunggu')).toHaveText('10,00 detik');
+
+  await page.getByRole('button', { name: 'Reset run' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Reset run ini?' });
+  await expect(dialog.getByRole('button', { name: 'Batal' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(status(page)).toContainText('Selesai');
+  await page.getByRole('button', { name: 'Reset run' }).click();
+  await dialog.getByRole('button', { name: 'Reset run' }).click();
+  await expect(status(page)).toContainText('Siap dijalankan');
+  await expect(page.getByRole('textbox', { name: 'Seed', exact: true })).toHaveValue('2026');
+  await expect(page.getByRole('list', { name: 'Jadwal pelanggan' })).toContainText('00:00');
+});
+
+test('UF-05 customers added while paused wait for resume and keep the worker timestamp', async ({ page }) => {
+  await open(page);
+  await setField(page, 'Kedatangan otomatis', '0');
+  await primary(page).click();
+  await expect.poll(async () => timer(page).textContent()).not.toBe('00:00');
+  await primary(page).click();
+  await expect(status(page)).toContainText('Dijeda');
+  const at = await timer(page).textContent();
+  await page.locator('#add-count').fill('3');
+  await page.getByRole('button', { name: 'Tambah pelanggan' }).click();
+  await expect(page.locator('.toolbar .callout')).toHaveText(`3 pelanggan dicatat pada ${at}. Menunggu Lanjutkan, pada waktu jeda.`);
+  await expect(page.getByRole('status')).toHaveText(`3 pelanggan dicatat pada ${at}. Menunggu Lanjutkan, pada waktu jeda.`);
+  const log = page.getByRole('region', { name: 'Tambahan pelanggan selama run' });
+  await expect(log).toContainText('Menunggu diproses saat lanjut');
+  await expect(page.locator('.counts')).toContainText('Tiba0');
+
+  await page.locator('#add-count').fill('21');
+  await page.getByRole('button', { name: 'Tambah pelanggan' }).click();
+  await expect(page.getByText('Jumlah pelanggan harus bilangan bulat 1–20.')).toBeVisible();
+
+  await primary(page).click();
+  await expect(log).toContainText('Manual');
+  await page.getByRole('button', { name: 'Selesaikan cepat' }).click();
+  await expect(status(page)).toContainText('Selesai · hasil final');
+  await expect(metric(page, 'Selesai dilayani')).toHaveText('3');
+});
+
+test('UF-03/UF-08 out-of-range schedule blocks the run; Ubah skenario resets into editing', async ({ page }) => {
+  await open(page);
+  await setField(page, 'Durasi', '2');
+  await page.locator('#entry-minute').fill('1');
+  await page.locator('#entry-second').fill('30');
+  await page.getByRole('button', { name: 'Tambah jadwal' }).click();
+  await setField(page, 'Durasi', '1');
+  await expect(page.getByText('Di luar durasi')).toBeVisible();
+  await primary(page).click();
+  await expect(page.getByRole('button', { name: /Hapus jadwal 01:30/ })).toBeFocused();
+  await expect(page.getByText('Ada jadwal di luar durasi menerima pelanggan', { exact: false })).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Belum ada jadwal.', { exact: false })).toBeVisible();
+
+  await primary(page).click();
+  await expect(status(page)).toContainText(/Berjalan|Selesai/);
+  await page.getByRole('button', { name: 'Ubah skenario' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Reset untuk mengubah skenario?' });
+  await dialog.getByRole('button', { name: 'Reset dan edit' }).click();
+  await expect(status(page)).toContainText('Siap dijalankan');
+  await expect(page.getByRole('textbox', { name: 'Loket aktif', exact: true })).toBeFocused();
+});
+
+test('UF-15 a hidden tab pauses the run and requires an explicit resume', async ({ page }) => {
+  await open(page);
+  await primary(page).click();
+  await expect(status(page)).toContainText('Berjalan');
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect(status(page)).toContainText('Dijeda · tab tidak aktif');
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect(page.getByText('Dijeda karena tab tidak aktif. Lanjutkan saat siap.')).toBeVisible();
+  const paused = await timer(page).textContent();
+  await page.waitForTimeout(400);
+  await expect(timer(page)).toHaveText(paused!);
+  await primary(page).click();
+  await expect(status(page)).toContainText('Berjalan');
+});
+
+for (const width of [360, 640, 768, 1280]) {
+  test(`layout at ${width} px keeps every core action reachable without horizontal scroll`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await primary(page).click();
+    await expect(status(page)).toContainText('Berjalan');
+    await expect(page.getByRole('button', { name: 'Tambah pelanggan' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Selesaikan cepat' })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+}
