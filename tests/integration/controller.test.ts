@@ -172,3 +172,49 @@ describe('controller transitions and failures', () => {
     expect(await t.call(t.controller.resume('manual'))).toMatchObject({ accepted: true });
   });
 });
+
+describe('controller comparison', () => {
+  const small = { ...DEFAULT_CONFIG, horizonSec: 120 };
+  // Steps one macrotask at a time so a test can act while the batch is mid-way.
+  async function until(done: () => boolean) {
+    for (let step = 0; step < 200 && !done(); step++) await vi.advanceTimersByTimeAsync(1);
+    expect(done()).toBe(true);
+  }
+  it('binds a fresh worker, reports progress and keeps the last completed batch across a cancel', async () => {
+    const t = setup();
+    const started = t.controller.startComparison(small, { ...small, c: 3 });
+    await until(() => t.controller.getView().comparison !== null);
+    expect(t.controller.getView().comparison).toMatchObject({ status: 'starting', completedPairs: 0 });
+    expect(await t.call(started)).toMatchObject({ accepted: true });
+    await t.settle();
+    const done = t.controller.getView();
+    expect(done.state).toMatchObject({ status: 'READY' });
+    expect(done.comparison).toMatchObject({ status: 'completed', completedPairs: 20 });
+    expect(done.lastComparison).toBe(done.comparison);
+    expect(done.comparison!.summary!.pairs).toBe(20);
+
+    const second = t.controller.startComparison(small, small);
+    await until(() => t.controller.getView().comparison?.status === 'running' && t.controller.getView().comparison!.completedPairs < 20);
+    await t.call(t.controller.cancelComparison());
+    await t.settle();
+    await second;
+    const view = t.controller.getView();
+    expect(view.comparison).toMatchObject({ status: 'cancelled', summary: null });
+    expect(view.lastComparison).toBe(done.comparison);
+  });
+
+  it('hidden suspends a running batch instead of pausing the parked visual run', async () => {
+    const t = setup();
+    await t.call(t.controller.create(small));
+    const started = t.controller.startComparison(small, { ...small, c: 1 });
+    await until(() => t.controller.getView().comparison?.status === 'running');
+    await t.call(t.controller.pauseForHidden());
+    await t.settle();
+    await started;
+    expect(t.controller.getView().comparison).toMatchObject({ status: 'suspended' });
+    expect(t.controller.getView().state!.status).toBe('READY');
+    await t.call(t.controller.resumeComparison());
+    await t.settle();
+    expect(t.controller.getView().comparison).toMatchObject({ status: 'completed', completedPairs: 20 });
+  });
+});

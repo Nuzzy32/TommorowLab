@@ -1,11 +1,22 @@
-import { ValidationError } from '../domain/config';
+import { ValidationError, validateConfig } from '../domain/config';
+import type { ScenarioConfig } from '../domain/config';
+import { demandMismatch, PAIRS, paramChanges, replicationSummary, sameDemand, summarize } from '../simulation/comparison';
+import type { PairResult, ReplicationSummary } from '../simulation/comparison';
 import { createSimulation } from '../simulation/engine';
-import type { RunStatus } from '../simulation/engine';
+import type { RunStatus, Snapshot } from '../simulation/engine';
 import { parseCommand, project, PROTOCOL_VERSION, ProtocolError } from './protocol';
-import type { Command, PauseReason, RejectCode, Reply, ReplyEnvelope } from './protocol';
+import type { Command, ComparisonReport, ComparisonStatus, PauseReason, RejectCode, Reply, ReplyEnvelope } from './protocol';
 
 type Engine = ReturnType<typeof createSimulation>;
 type Job = { kind: 'advance' | 'fast'; seq: number; target: number };
+/** One serial batch: pair r runs A then B on the same demand; the visual run stays parked meanwhile. */
+type Batch = {
+  id: string; a: ScenarioConfig; b: ScenarioConfig; identical: boolean; suspended: boolean;
+  r: number; side: 'a' | 'b'; sim: Engine; first: { summary: ReplicationSummary; customers: Snapshot['customers'] } | null;
+  pairs: PairResult[];
+};
+// Commands that would compute or replace the visual run; refused while a batch owns the worker.
+const VISUAL_COMPUTE = new Set<Command['type']>(['CREATE_RUN', 'RESET_RUN', 'REPLAY_RUN', 'RUN', 'ADVANCE_TO', 'RESUME_RUN', 'ADD_MANUAL', 'FAST_FINISH']);
 
 // Design budgets from ARCHITECTURE §6.3/§7.2; real latency still needs the reference-device benchmark.
 const SLICE_MS = 4;
@@ -34,6 +45,7 @@ export function createWorkerRuntime(
   let job: Job | null = null;
   let pauseReason: PauseReason | null = null;
   let lastSnapshotAt = -Infinity;
+  let batch: Batch | null = null;
   const replies = new Map<number, ReplyEnvelope>();
 
   const state = (sim = engine!) => {
@@ -104,6 +116,73 @@ export function createWorkerRuntime(
     }
   }
 
+  function report(current: Batch, status: ComparisonStatus, message: string | null = null, replyTo: number | null = null) {
+    const payload: ComparisonReport = {
+      type: 'COMPARISON', batchId: current.id, status, completedPairs: current.pairs.length, a: current.a, b: current.b,
+      pairs: status === 'completed' ? current.pairs : [], message,
+      summary: status === 'completed' ? summarize(current.pairs, current.identical) : null,
+    };
+    send(replyTo, payload, epoch!, current.id);
+  }
+
+  function endBatch(current: Batch, status: ComparisonStatus, message: string | null = null) {
+    batch = null;
+    report(current, status, message);
+  }
+
+  const startSide = (config: ScenarioConfig, r: number) => {
+    const sim = createSimulation(config, r);
+    sim.start();
+    return sim;
+  };
+
+  // Same slice budget as the visual run; suspend/cancel are handled between slices.
+  function batchWork(current: Batch) {
+    if (batch !== current || current.suspended) return;
+    const started = now();
+    try {
+      for (let groups = 1; ; groups++) {
+        const status = current.sim.progress().status;
+        if (status === 'RUNNING') {
+          current.sim.step();
+        } else {
+          const done = current.sim.snapshot();
+          if (status !== 'COMPLETED' || !done.result) {
+            return endBatch(current, 'invalid', `Pasangan ${current.r + 1} sisi ${current.side.toUpperCase()} berhenti: ${done.stopReason?.message ?? status}. Kurangi durasi atau kedatangan.`);
+          }
+          const summary = replicationSummary(done.result);
+          if (current.side === 'a') {
+            current.first = { summary, customers: done.customers };
+            current.side = 'b';
+            current.sim = startSide(current.b, current.r);
+          } else {
+            if (!sameDemand(current.first!.customers, done.customers)) {
+              return endBatch(current, 'invalid', `Permintaan pasangan ${current.r + 1} tidak identik antara A dan B.`);
+            }
+            current.pairs.push({ r: current.r, a: current.first!.summary, b: summary });
+            current.first = null;
+            if (current.pairs.length === PAIRS) return endBatch(current, 'completed');
+            current.r++;
+            current.side = 'a';
+            current.sim = startSide(current.a, current.r);
+            report(current, 'running');
+          }
+        }
+        if (groups >= SLICE_GROUPS || now() - started >= SLICE_MS) {
+          schedule(() => batchWork(current));
+          return;
+        }
+      }
+    } catch (error) {
+      endBatch(current, 'invalid', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  function owned(batchId: string) {
+    if (!batch || batch.id !== batchId) throw new Rejection('INVALID_STATE', 'Tidak ada perbandingan aktif dengan ID ini.');
+    return batch;
+  }
+
   // Reset, replay and replacement: ACK on the old epoch first, then the new generation's snapshot.
   function replace(seq: number, command: Extract<Command, { nextEpoch: number }>, create: () => Engine) {
     if (command.nextEpoch !== epoch! + 1) throw new Rejection('INVALID_INPUT', 'nextEpoch harus epoch aktif + 1.');
@@ -126,7 +205,47 @@ export function createWorkerRuntime(
     const need = (...allowed: RunStatus[]) => {
       if (!allowed.includes(current)) throw new Rejection('INVALID_STATE', `Aksi tidak tersedia pada status ${current}.`);
     };
+    if (batch && VISUAL_COMPUTE.has(command.type)) throw new Rejection('BUSY', 'Perbandingan A/B sedang berjalan; tunggu atau batalkan dulu.');
     switch (command.type) {
+      case 'START_COMPARISON': {
+        if (batch) throw new Rejection('BUSY', 'Perbandingan lain masih berjalan.');
+        if (current === 'RUNNING') throw new Rejection('BUSY', 'Pause run terlebih dahulu; run dan perbandingan tidak dihitung bersamaan.');
+        const a = validateConfig(command.a);
+        const b = validateConfig(command.b);
+        const mismatch = demandMismatch(a, b);
+        if (mismatch.length) throw new Rejection('INVALID_INPUT', `Permintaan A dan B harus sama; berbeda pada ${mismatch.join(', ')}.`);
+        const next: Batch = {
+          id: command.batchId, a, b, identical: paramChanges(a, b).length === 0, suspended: false,
+          r: 0, side: 'a', sim: startSide(a, 0), first: null, pairs: [],
+        };
+        batch = next;
+        ack(seq, command);
+        report(next, 'running');
+        schedule(() => batchWork(next));
+        return;
+      }
+      case 'SUSPEND_COMPARISON': {
+        const target = owned(command.batchId);
+        if (target.suspended) throw new Rejection('INVALID_STATE', 'Perbandingan sudah ditangguhkan.');
+        target.suspended = true;
+        ack(seq, command);
+        return report(target, 'suspended');
+      }
+      case 'RESUME_COMPARISON': {
+        const target = owned(command.batchId);
+        if (!target.suspended) throw new Rejection('INVALID_STATE', 'Perbandingan tidak sedang ditangguhkan.');
+        target.suspended = false;
+        ack(seq, command);
+        report(target, 'running');
+        schedule(() => batchWork(target));
+        return;
+      }
+      case 'CANCEL_COMPARISON': {
+        // A batch that completed before this message wins; cancel is then a rejected no-op.
+        const target = owned(command.batchId);
+        ack(seq, command);
+        return endBatch(target, 'cancelled');
+      }
       case 'CREATE_RUN':
         return replace(seq, command, () => createSimulation(command.config, 0, command.replayLog ?? []));
       case 'RESET_RUN': {

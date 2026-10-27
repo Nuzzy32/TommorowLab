@@ -8,11 +8,13 @@ import type { Ack } from '../workers/protocol';
 import { buildConfig, draftReducer, FIELD_ORDER, fieldValue, horizonSec, initialDraft, outOfRange, parseNumber } from './draft';
 import { formatClock } from './format';
 import { ParameterPanel } from './ParameterPanel';
+import { ComparePanel } from './ComparePanel';
+import type { Baseline } from './ComparePanel';
 import { InputLog, Results, SceneBox, STATUS_LABEL, StatusStrip } from './RunPanels';
 import { ConfirmDialog, DialogShell, Icon } from './ui';
 import type { IconName } from './ui';
 
-const EMPTY_VIEW: ControllerView = { projection: null, state: null, speed: 20, transitioning: false, failure: null };
+const EMPTY_VIEW: ControllerView = { projection: null, state: null, speed: 20, transitioning: false, failure: null, comparison: null, lastComparison: null };
 const noSubscribe = () => () => {};
 const emptyView = () => EMPTY_VIEW;
 const SPEEDS: Speed[] = [1, 5, 20];
@@ -26,6 +28,8 @@ const HELP: { icon: IconName; title: string; body: string; tip: string }[] = [
     tip: 'Selama run, parameter dikunci. Ubah skenario akan mereset run setelah konfirmasi.' },
   { icon: 'userPlus', title: 'Tambah pelanggan', body: 'Saat run berjalan atau dijeda, tambahkan 1–20 pelanggan sekaligus. Kedatangan dicatat pada waktu simulasi, bukan waktu klik.',
     tip: 'Tambahan saat jeda menunggu diproses ketika run dilanjutkan.' },
+  { icon: 'scales', title: 'Bandingkan A/B', body: 'Jadikan skenario sebagai baseline A, ubah loket atau waktu pelayanan kandidat B, lalu jalankan 20 pasangan replikasi dengan permintaan yang sama.',
+    tip: 'Hasil ditampilkan sebagai selisih B − A dengan interval 95%; interval yang menyentuh nol berarti arahnya belum meyakinkan.' },
 ];
 const ASSUMPTIONS: { icon: IconName; title: string; body: string }[] = [
   { icon: 'flask', title: 'Data sintetis', body: 'Hasil berasal dari model, bukan data kantin nyata. Distribusi belum dikalibrasi terhadap lapangan.' },
@@ -72,6 +76,10 @@ export function App() {
   const [notice, setNotice] = useState<Notice>(null);
   const [announcement, setAnnouncement] = useState('');
   const [confirm, setConfirm] = useState<null | 'reset' | 'edit'>(null);
+  const [tab, setTab] = useState<'sim' | 'compare'>('sim');
+  const [compareConfirm, setCompareConfirm] = useState<null | 'open' | 'baseline'>(null);
+  const [baseline, setBaseline] = useState<{ value: Baseline; version: number } | null>(null);
+  const [compareNotice, setCompareNotice] = useState<string | null>(null);
   const [assumptionsOpen, setAssumptionsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(true);
   const [helpStep, setHelpStep] = useState(0);
@@ -89,6 +97,8 @@ export function App() {
   const editable = status === 'READY' && !view.transitioning;
   const live = status === 'RUNNING' || status === 'PAUSED';
   const horizon = status === 'READY' ? horizonSec(draft.fields) : projection?.configSnapshot.horizonSec ?? null;
+  const batch = view.comparison;
+  const batchActive = batch !== null && (batch.status === 'starting' || batch.status === 'running' || batch.status === 'suspended');
   const counters = status === 'READY' ? fieldValue(draft.fields, 'c') ?? projection?.configSnapshot.c ?? 2 : projection?.configSnapshot.c ?? 2;
 
   async function act<T extends Ack | null>(task: () => Promise<T>, onAccepted?: (ack: Accepted) => void) {
@@ -150,6 +160,39 @@ export function App() {
     });
   }
 
+  // Baseline A from the Simulasi context: the valid draft when READY, otherwise the run's snapshot (never the live queue).
+  function takeBaseline() {
+    setCompareConfirm(null);
+    let value: Baseline;
+    if (status === 'READY' || !projection) {
+      const built = buildConfig(draft);
+      if ('errors' in built) {
+        setTab('sim');
+        flushSync(() => dispatch({ type: 'errors', errors: built.errors }));
+        setNotice({ tone: 'danger', text: 'Perbaiki isian skenario yang ditandai sebelum menjadikannya baseline A.' });
+        return;
+      }
+      value = { config: built.config, source: 'draft skenario', log: [] };
+    } else {
+      value = { config: projection.configSnapshot, source: `snapshot run (${STATUS_LABEL[status].toLowerCase()})`, log: projection.inputLog };
+    }
+    setBaseline(current => ({ value, version: (current?.version ?? 0) + 1 }));
+    setCompareNotice(null);
+    setTab('compare');
+    setAnnouncement(`Baseline A ditetapkan dari ${value.source}; kandidat B dibuat identik.`);
+  }
+  const requestBaseline = () => (baseline ? setCompareConfirm('baseline') : takeBaseline());
+
+  // A running visual run is paused first: run and batch are never computed together (UF-09).
+  function openCompare() {
+    if (status === 'RUNNING') { setCompareConfirm('open'); return; }
+    setTab('compare');
+  }
+  function pauseAndOpen() {
+    setCompareConfirm(null);
+    void act(() => controller!.pause(), () => setTab('compare'));
+  }
+
   let primary: { label: string; icon: IconName; onClick: () => void };
   if (fast) primary = { label: 'Batalkan penyelesaian', icon: 'stop', onClick: () => void act(() => controller!.cancelFast()) };
   else if (status === 'READY') primary = { label: 'Jalankan', icon: 'play', onClick: run };
@@ -186,7 +229,7 @@ export function App() {
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [controller]);
 
-  const hasProgress = live || status === 'COMPLETED';
+  const hasProgress = live || status === 'COMPLETED' || batchActive;
   useEffect(() => {
     if (!hasProgress) return;
     const onUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); };
@@ -197,6 +240,7 @@ export function App() {
   // Space toggles pause/resume only from non-interactive workspace focus, never from fields or dialogs.
   const toggleRef = useRef<() => void>(() => {});
   toggleRef.current = () => {
+    if (tab !== 'sim' || batchActive) return;
     if (status === 'RUNNING' && !fast) primary.onClick();
     else if (status === 'PAUSED') primary.onClick();
   };
@@ -213,7 +257,8 @@ export function App() {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  const addReason = !live ? 'Tersedia saat run berjalan atau dijeda.'
+  const addReason = batchActive ? 'Tidak tersedia selama perbandingan A/B berjalan.'
+    : !live ? 'Tersedia saat run berjalan atau dijeda.'
     : fast ? 'Tidak tersedia selama penyelesaian cepat.'
       : phase === 'draining' || (horizon !== null && simTime >= horizon) ? 'Kedatangan ditutup; sisa pelanggan sedang diselesaikan.' : null;
   const name = projection?.configSnapshot.name ?? 'Jam makan siang';
@@ -231,6 +276,12 @@ export function App() {
             <a className="wordmark" href="./">Tomorrow<span>Lab</span></a>
             <span className="tagline">Coba skenario. Pahami dampaknya.</span>
           </div>
+          <div className="tabs" role="tablist" aria-label="Area kerja">
+            <button type="button" role="tab" id="tab-sim" aria-controls="main" aria-selected={tab === 'sim'} tabIndex={tab === 'sim' ? 0 : -1}
+              onClick={() => setTab('sim')}><Icon name="flask" size={16} />Simulasi</button>
+            <button type="button" role="tab" id="tab-compare" aria-controls="panel-compare" aria-selected={tab === 'compare'} tabIndex={tab === 'compare' ? 0 : -1}
+              onClick={openCompare}><Icon name="scales" size={16} />Bandingkan{batchActive && <span className="tab-dot" aria-label="perbandingan berjalan" />}</button>
+          </div>
           <div className="header-spacer" />
           <div className="scenario-name">
             <h1 id="workspace-title" tabIndex={-1}>{name}</h1>
@@ -242,26 +293,30 @@ export function App() {
           </nav>
         </header>
 
-        <main id="main" className="workspace">
-          <StatusStrip status={status} phase={phase} simTimeSec={simTime} horizonSec={horizon} fastMode={fast}
-            pauseReason={projection?.pauseReason ?? null} seed={seed} speed={view.speed}
-            drainSec={status === 'COMPLETED' ? projection?.result?.drainDurationSec ?? null : null}>
-            {view.failure && (
-              <p className="callout danger" role="alert"><Icon name="warning" /><span>Worker simulasi berhenti. Reset untuk memulai lagi dengan parameter yang sama.</span></p>
-            )}
-            {hiddenPause && (
-              <p className="callout warning"><Icon name="hidden" /><span>Dijeda karena tab tidak aktif. Lanjutkan saat siap.</span></p>
-            )}
-          </StatusStrip>
+        <StatusStrip status={status} phase={phase} simTimeSec={simTime} horizonSec={horizon} fastMode={fast}
+          pauseReason={projection?.pauseReason ?? null} seed={seed} speed={view.speed}
+          drainSec={status === 'COMPLETED' ? projection?.result?.drainDurationSec ?? null : null}>
+          {batchActive && (
+            <p className="callout info"><Icon name="scales" /><span>Perbandingan A/B sedang berjalan di tab Bandingkan; run Simulasi tidak dihitung bersamaan.</span></p>
+          )}
+          {view.failure && (
+            <p className="callout danger" role="alert"><Icon name="warning" /><span>Worker simulasi berhenti. Reset untuk memulai lagi dengan parameter yang sama.</span></p>
+          )}
+          {hiddenPause && (
+            <p className="callout warning"><Icon name="hidden" /><span>Dijeda karena tab tidak aktif. Lanjutkan saat siap.</span></p>
+          )}
+        </StatusStrip>
+
+        <main id="main" className="workspace" role="tabpanel" aria-labelledby="tab-sim" hidden={tab !== 'sim'}>
 
           <section className="glass panel stage area-stage" aria-label="Panggung simulasi">
             <div className="toolbar-row" role="group" aria-label="Kontrol run">
-              <button type="button" id="primary-action" className="button primary" disabled={!controller}
+              <button type="button" id="primary-action" className="button primary" disabled={!controller || batchActive}
                 aria-disabled={busy || view.transitioning || undefined}
                 onClick={() => { if (!busyRef.current && !view.transitioning) primary.onClick(); }}>
                 <Icon name={primary.icon} weight="fill" />{primary.label}
               </button>
-              {live && !fast && (
+              {live && !fast && !batchActive && (
                 <button type="button" className="button" onClick={() => void act(() => controller!.fastFinish())}>
                   <Icon name="fast" />Selesaikan cepat
                 </button>
@@ -279,7 +334,7 @@ export function App() {
                 </div>
               </fieldset>
               <div className="toolbar-spacer" />
-              {(live || status === 'COMPLETED') && (
+              {(live || status === 'COMPLETED') && !batchActive && (
                 <button type="button" className="button danger" onClick={() => setConfirm('reset')}><Icon name="reset" />Reset run</button>
               )}
             </div>
@@ -310,9 +365,16 @@ export function App() {
 
           <ParameterPanel draft={draft} dispatch={dispatch} editable={editable} onUnlock={() => setConfirm('edit')}
             status={status === 'READY' ? 'draft' : status === 'COMPLETED' ? 'done' : 'running'} />
-          <Results status={status} projection={projection} horizonSec={horizon} onAssumptions={() => setAssumptionsOpen(true)} onEdit={() => setConfirm('edit')} />
+          <Results status={status} projection={projection} horizonSec={horizon} onAssumptions={() => setAssumptionsOpen(true)} onEdit={() => setConfirm('edit')} onBaseline={requestBaseline} />
           <InputLog status={status} projection={projection} draftSchedule={draft.schedule} />
         </main>
+
+        <div className="compare-view" id="panel-compare" role="tabpanel" aria-labelledby="tab-compare" hidden={tab !== 'compare'}>
+          {compareNotice && <p className="callout danger" role="alert"><Icon name="warning" /><span>{compareNotice}</span></p>}
+          <ComparePanel key={baseline?.version ?? 0} controller={controller} comparison={batch} lastComparison={view.lastComparison}
+            baseline={baseline?.value ?? null} onSetBaseline={requestBaseline} onOpenSimulation={() => setTab('sim')}
+            onAssumptions={() => setAssumptionsOpen(true)} announce={setAnnouncement} onNotice={setCompareNotice} />
+        </div>
       </div>
 
       <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
@@ -347,6 +409,13 @@ export function App() {
           Hapus progres, hasil run, dan tambahan pelanggan selama run ini? Parameter, seed, dan jadwal awal tetap disimpan.</p>}
         confirmLabel={confirm === 'edit' ? 'Reset dan edit' : 'Reset run'}
         onCancel={() => setConfirm(null)} onConfirm={() => reset(confirm === 'edit')} />
+
+      <ConfirmDialog open={compareConfirm === 'open'} title="Pause dan buka perbandingan?"
+        description={<p>Run dan perbandingan tidak dihitung bersamaan. Run ini dijeda pada waktu simulasi {formatClock(simTime)} dan dapat dilanjutkan nanti.</p>}
+        confirmLabel="Pause dan buka" onCancel={() => setCompareConfirm(null)} onConfirm={pauseAndOpen} />
+      <ConfirmDialog open={compareConfirm === 'baseline'} title="Ganti baseline A?"
+        description={<p>Baseline A dan kandidat B saat ini diganti dengan skenario dari tab Simulasi. Hasil perbandingan terakhir tetap ditampilkan sebagai hasil sebelumnya.</p>}
+        confirmLabel="Ganti baseline" onCancel={() => setCompareConfirm(null)} onConfirm={takeBaseline} />
 
       <DialogShell open={assumptionsOpen} className="dialog drawer" labelledBy="assumptions-title" describedBy="assumptions-desc"
         onClose={() => setAssumptionsOpen(false)}>

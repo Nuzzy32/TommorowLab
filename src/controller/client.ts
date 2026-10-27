@@ -1,7 +1,7 @@
-import type { ManualEntry } from '../domain/config';
+import type { ManualEntry, ScenarioConfig } from '../domain/config';
 import type { RunState } from '../simulation/engine';
 import { PROTOCOL_VERSION } from '../workers/protocol';
-import type { Ack, Command, PauseReason, Projection, ReplyEnvelope } from '../workers/protocol';
+import type { Ack, Command, ComparisonReport, PauseReason, Projection, ReplyEnvelope } from '../workers/protocol';
 
 export type Port = {
   postMessage(message: unknown): void;
@@ -11,12 +11,17 @@ export type Port = {
   terminate(): void;
 };
 export type Speed = 1 | 5 | 20;
+export type ComparisonState = Omit<ComparisonReport, 'type' | 'status'> & { status: ComparisonReport['status'] | 'starting' };
 export type ControllerView = {
   projection: Projection | null;
   state: RunState | null;
   speed: Speed;
   transitioning: boolean;
   failure: string | null;
+  /** The latest batch, whatever its status. */
+  comparison: ComparisonState | null;
+  /** The latest batch that completed; a later cancelled or invalid batch never replaces it. */
+  lastComparison: ComparisonState | null;
 };
 type Pending = { resolve: (ack: Ack) => void; reject: (error: Error) => void; control: boolean };
 
@@ -53,7 +58,8 @@ export function createSimulationController({
   let lastAckSim = 0;
   const pending = new Map<number, Pending>();
   const listeners = new Set<(view: ControllerView) => void>();
-  let view: ControllerView = { projection: null, state: null, speed: 20, transitioning: false, failure: null };
+  let batchCounter = 0;
+  let view: ControllerView = { projection: null, state: null, speed: 20, transitioning: false, failure: null, comparison: null, lastComparison: null };
 
   function update(patch: Partial<ControllerView>) {
     view = { ...view, ...patch };
@@ -101,7 +107,12 @@ export function createSimulationController({
     pending.clear();
     transitionSeq = advanceSeq = null;
     controlsInFlight = 0;
-    update({ failure: message, transitioning: false });
+    const batch = view.comparison;
+    update({
+      failure: message, transitioning: false,
+      comparison: batch && (batch.status === 'running' || batch.status === 'starting' || batch.status === 'suspended')
+        ? { ...batch, status: 'invalid', message } : batch,
+    });
   }
 
   function receive(data: unknown) {
@@ -125,6 +136,12 @@ export function createSimulationController({
         update({ projection: null, state: payload.state, transitioning: false });
       } else update({ transitioning: false });
       entry.resolve(payload);
+      return;
+    }
+    if (payload.type === 'COMPARISON') {
+      if (reply.epoch !== epoch || payload.batchId !== view.comparison?.batchId) return;
+      const { type: _type, ...state } = payload;
+      update({ comparison: state, ...(state.status === 'completed' ? { lastComparison: state } : {}) });
       return;
     }
     if (reply.epoch !== epoch || reply.jobId !== runId) return;
@@ -213,8 +230,25 @@ export function createSimulationController({
     },
     // Tab hidden: stop issuing targets at once and pause a running visual or fast run; no catch-up later.
     pauseForHidden() {
+      const batch = view.comparison;
+      if (batch?.status === 'running') return request({ type: 'SUSPEND_COMPARISON', batchId: batch.batchId, reason: 'hidden' }, false);
       return view.state?.status === 'RUNNING' ? control({ type: 'PAUSE_RUN', reason: 'hidden' }) : Promise.resolve(null);
     },
+    /** 20 paired replications of A and B; binds a fresh worker to a READY run of A first if needed. */
+    async startComparison(a: ScenarioConfig, b: ScenarioConfig) {
+      if (!port || view.failure || view.state === null) {
+        const created = await create(a);
+        if (!created.accepted) return created;
+      }
+      const batchId = `batch:${++batchCounter}`;
+      const previous = view.comparison;
+      update({ comparison: { batchId, status: 'starting', completedPairs: 0, a, b, pairs: [], summary: null, message: null } });
+      const ack = await request({ type: 'START_COMPARISON', batchId, a, b }, false);
+      if (!ack.accepted && view.comparison?.batchId === batchId) update({ comparison: previous });
+      return ack;
+    },
+    resumeComparison: () => request({ type: 'RESUME_COMPARISON', batchId: view.comparison?.batchId ?? '' }, false),
+    cancelComparison: () => request({ type: 'CANCEL_COMPARISON', batchId: view.comparison?.batchId ?? '' }, false),
     dispose() {
       disposed = true;
       fail('Controller sudah ditutup.');

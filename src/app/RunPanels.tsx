@@ -236,8 +236,8 @@ function QueueChart({ projection, horizonSec }: { projection: Projection | null;
   );
 }
 
-export const Results = memo(function Results({ status, projection, horizonSec, onAssumptions, onEdit }: {
-  status: RunStatus; projection: Projection | null; horizonSec: number | null; onAssumptions: () => void; onEdit: () => void;
+export const Results = memo(function Results({ status, projection, horizonSec, onAssumptions, onEdit, onBaseline }: {
+  status: RunStatus; projection: Projection | null; horizonSec: number | null; onAssumptions: () => void; onEdit: () => void; onBaseline: () => void;
 }) {
   const live = status === 'RUNNING' || status === 'PAUSED';
   const invalid = INVALID.has(status);
@@ -335,6 +335,7 @@ export const Results = memo(function Results({ status, projection, horizonSec, o
       )}
       {result && (
         <div className="results-actions">
+          <button type="button" className="button compact" onClick={onBaseline}><Icon name="scales" size={15} />Jadikan baseline A</button>
           <button type="button" className="button compact" onClick={onEdit}><Icon name="pencil" size={15} />Ubah skenario</button>
         </div>
       )}

@@ -43,10 +43,12 @@ test('UF-01 opens a ready preset without login or camera, with skippable help', 
   await expect(page).toHaveTitle('TomorrowLab — Laboratorium skenario');
   await expect(page.locator('html')).toHaveAttribute('lang', 'id');
   const help = page.getByRole('dialog', { name: 'Jalankan percobaan' });
-  await expect(help).toContainText('1 dari 3');
+  await expect(help).toContainText('1 dari 4');
   await help.getByRole('button', { name: 'Berikutnya' }).click();
-  await expect(page.getByRole('dialog', { name: 'Ubah skenario' })).toContainText('2 dari 3');
+  await expect(page.getByRole('dialog', { name: 'Ubah skenario' })).toContainText('2 dari 4');
   await page.getByRole('button', { name: 'Berikutnya' }).click();
+  await page.getByRole('button', { name: 'Berikutnya' }).click();
+  await expect(page.getByRole('dialog', { name: 'Bandingkan A/B' })).toContainText('4 dari 4');
   await page.getByRole('button', { name: 'Mulai mencoba' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(primary(page)).toBeFocused();
@@ -275,4 +277,62 @@ test('without WebGL the stage falls back to the compact view and the run still w
   await primary(page).click();
   await page.getByRole('button', { name: 'Selesaikan cepat' }).click();
   await expect(status(page)).toContainText('Selesai · hasil final');
+});
+
+test('UF-09/10/11 A=B is identical, then a third counter gives a paired result and marks the old one', async ({ page }) => {
+  await open(page);
+  await page.getByRole('tab', { name: 'Bandingkan' }).click();
+  await expect(page.getByRole('heading', { name: 'Belum ada baseline A' })).toBeVisible();
+  await page.getByRole('button', { name: 'Jadikan skenario sekarang baseline A' }).click();
+  await expect(page.getByText('Belum ada parameter yang diubah · Skenario identik.')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Loket aktif', exact: true }).last()).toHaveValue('2');
+
+  await page.getByRole('button', { name: 'Jalankan 20 pasangan' }).click();
+  const result = page.getByRole('region', { name: 'Hasil perbandingan' });
+  await expect(result.getByText('Skenario identik', { exact: false })).toBeVisible();
+  await expect(result).toContainText('[0,00; 0,00]');
+  await expect(result.locator('.tag')).toHaveText('Final');
+
+  await page.getByRole('button', { name: 'Tambah loket kandidat B' }).click();
+  await expect(page.locator('.compare-diff')).toContainText('Loket: 2 → 3');
+  await expect(result.locator('.tag')).toHaveText('Hasil dari konfigurasi sebelumnya');
+  await page.getByRole('button', { name: 'Jalankan 20 pasangan' }).click();
+  await expect(result.getByText('Waktu tunggu rata-rata B lebih rendah pada eksperimen ini.')).toBeVisible();
+  await expect(result.locator('.tag')).toHaveText('Final');
+  await result.getByText('Detail 20 pasangan').click();
+  await expect(result.locator('.pair-details tbody tr')).toHaveCount(20);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('opening Bandingkan while running asks to pause first and keeps the run paused', async ({ page }) => {
+  await open(page);
+  await primary(page).click();
+  await expect(status(page)).toContainText('Berjalan');
+  await page.getByRole('tab', { name: 'Bandingkan' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Pause dan buka perbandingan?' });
+  await expect(dialog.getByRole('button', { name: 'Batal' })).toBeFocused();
+  await dialog.getByRole('button', { name: 'Pause dan buka' }).click();
+  await expect(status(page)).toContainText('Dijeda');
+  await expect(page.getByRole('tab', { name: 'Bandingkan' })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('button', { name: 'Jadikan skenario sekarang baseline A' }).click();
+  await expect(page.getByText('sumber A: snapshot run (dijeda)')).toBeVisible();
+  await page.getByRole('button', { name: 'Kurangi loket kandidat B' }).click();
+  await page.getByRole('button', { name: 'Jalankan 20 pasangan' }).click();
+  await expect(page.getByRole('region', { name: 'Hasil perbandingan' }).locator('.tag')).toHaveText('Final');
+  await page.getByRole('tab', { name: 'Simulasi' }).click();
+  await expect(status(page)).toContainText('Dijeda');
+  await primary(page).click();
+  await expect(status(page)).toContainText('Berjalan');
+});
+
+test('a completed run can become baseline A from the results panel', async ({ page }) => {
+  await st01(page);
+  await primary(page).click();
+  await page.getByRole('button', { name: 'Selesaikan cepat' }).click();
+  await expect(status(page)).toContainText('Selesai · hasil final');
+  await page.getByRole('button', { name: 'Jadikan baseline A' }).click();
+  await expect(page.getByText('sumber A: snapshot run (selesai · hasil final)')).toBeVisible();
+  await page.getByRole('button', { name: 'Jalankan 20 pasangan' }).click();
+  // λ=0 with a fixed schedule: every replication sees the same three customers.
+  await expect(page.getByRole('region', { name: 'Hasil perbandingan' })).toContainText('Skenario identik');
 });

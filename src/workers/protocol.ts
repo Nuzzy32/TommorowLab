@@ -1,5 +1,6 @@
 import { VERSIONS } from '../domain/config';
-import type { ManualEntry } from '../domain/config';
+import type { ManualEntry, ScenarioConfig } from '../domain/config';
+import type { ComparisonSummary, PairResult } from '../simulation/comparison';
 import type { RunState, Snapshot } from '../simulation/engine';
 
 export const PROTOCOL_VERSION = VERSIONS.protocolVersion;
@@ -8,7 +9,6 @@ export const AVATAR_LIMIT = 150;
 export type PauseReason = 'manual' | 'gesture' | 'hidden';
 type Transition = { nextEpoch: number; nextRunId: string };
 
-// Comparison commands (START/SUSPEND/RESUME/CANCEL_COMPARISON) belong to the A/B work package.
 export type Command =
   | ({ type: 'CREATE_RUN'; config: unknown; replayLog?: ManualEntry[] } & Transition)
   | { type: 'RUN' }
@@ -19,7 +19,11 @@ export type Command =
   | { type: 'FAST_FINISH' }
   | { type: 'CANCEL_FAST' }
   | ({ type: 'RESET_RUN' } & Transition)
-  | ({ type: 'REPLAY_RUN' } & Transition);
+  | ({ type: 'REPLAY_RUN' } & Transition)
+  | { type: 'START_COMPARISON'; batchId: string; a: unknown; b: unknown }
+  | { type: 'SUSPEND_COMPARISON'; batchId: string; reason: 'hidden' }
+  | { type: 'RESUME_COMPARISON'; batchId: string }
+  | { type: 'CANCEL_COMPARISON'; batchId: string };
 export type CommandType = Command['type'];
 
 export type CommandEnvelope<T = Command> = {
@@ -47,13 +51,28 @@ export type Projection = Omit<Snapshot, 'customers' | 'waitingCustomerIds'> & {
   queuePeaks: QueuePeaks;
 };
 
+export type ComparisonStatus = 'running' | 'suspended' | 'completed' | 'cancelled' | 'invalid';
+/** Batch progress; replies use the batch id as envelope jobId. Pairs count only once both sides are valid. */
+export type ComparisonReport = {
+  type: 'COMPARISON';
+  batchId: string;
+  status: ComparisonStatus;
+  completedPairs: number;
+  a: ScenarioConfig;
+  b: ScenarioConfig;
+  pairs: PairResult[];
+  summary: ComparisonSummary | null;
+  message: string | null;
+};
+
 export type Ack =
   | { type: 'ACK'; command: CommandType; accepted: true; state: RunState; entry?: ManualEntry; nextEpoch?: number; nextRunId?: string }
   | { type: 'ACK'; command: CommandType | null; accepted: false; code: RejectCode; message: string; state: RunState | null };
 export type Reply =
   | Ack
   | { type: 'ADVANCED'; outcome: 'reached' | 'interrupted' | 'stopped'; state: RunState }
-  | { type: 'SNAPSHOT'; projection: Projection };
+  | { type: 'SNAPSHOT'; projection: Projection }
+  | ComparisonReport;
 
 export type ReplyEnvelope<T = Reply> = {
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -95,6 +114,18 @@ export function parseCommand(input: unknown): CommandEnvelope {
       break;
     case 'RESET_RUN': case 'REPLAY_RUN':
       command = { type: p.type, ...transition(p) };
+      break;
+    case 'START_COMPARISON':
+      if (!isText(p.batchId)) malformed('batchId tidak valid.');
+      command = { type: 'START_COMPARISON', batchId: p.batchId as string, a: p.a, b: p.b };
+      break;
+    case 'SUSPEND_COMPARISON':
+      if (!isText(p.batchId) || p.reason !== 'hidden') malformed('batchId/alasan tidak valid.');
+      command = { type: 'SUSPEND_COMPARISON', batchId: p.batchId as string, reason: 'hidden' };
+      break;
+    case 'RESUME_COMPARISON': case 'CANCEL_COMPARISON':
+      if (!isText(p.batchId)) malformed('batchId tidak valid.');
+      command = { type: p.type, batchId: p.batchId as string };
       break;
     case 'RUN': case 'FAST_FINISH': case 'CANCEL_FAST':
       command = { type: p.type };

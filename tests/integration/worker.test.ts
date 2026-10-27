@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG } from '../../src/domain/config';
 import type { ManualEntry, ScenarioConfig } from '../../src/domain/config';
+import { PAIRS, replicationSummary, summarize } from '../../src/simulation/comparison';
+import type { PairResult } from '../../src/simulation/comparison';
 import { createFixtureSimulation, createSimulation } from '../../src/simulation/engine';
 import { queuePeaks } from '../../src/workers/protocol';
-import type { Ack, Command, Projection, Reply, ReplyEnvelope } from '../../src/workers/protocol';
+import type { Ack, Command, ComparisonReport, Projection, Reply, ReplyEnvelope } from '../../src/workers/protocol';
 import { createWorkerRuntime } from '../../src/workers/runtime';
 
 const cfg = (patch: Partial<ScenarioConfig> = {}): ScenarioConfig => ({ ...DEFAULT_CONFIG, ...patch });
@@ -295,4 +297,102 @@ it('queue peaks are exact post-dispatch levels per bin (ST-01) and only fill ela
   // Two wait from t=0, one from t=10 to 20, empty afterwards.
   expect([series.peaks[0], series.peaks[19], series.peaks[20], series.peaks[39], series.peaks[40], series.peaks[119]]).toEqual([2, 2, 1, 1, 0, 0]);
   expect(queuePeaks(done.customers, 60, 15).peaks).toHaveLength(31);
+});
+
+describe('A/B comparison batch (SIMULATION_SPEC §6, ARCHITECTURE §6.2/§8)', () => {
+  const small = cfg({ horizonSec: 300 });
+  const reports = (h: ReturnType<typeof harness>) => h.replies
+    .filter(reply => reply.payload.type === 'COMPARISON').map(reply => reply.payload as ComparisonReport);
+  const direct = (a: ScenarioConfig, b: ScenarioConfig) => Array.from({ length: PAIRS }, (_, r): PairResult => {
+    const run = (config: ScenarioConfig) => { const sim = createSimulation(config, r); sim.start(); return replicationSummary(sim.finish().result!); };
+    return { r, a: run(a), b: run(b) };
+  });
+
+  it('runs 20 serial pairs on shared demand and matches the direct engine summary', () => {
+    const b = { ...small, c: 3, serviceMinSec: 15 };
+    const h = harness();
+    h.create(small);
+    expect(h.ack(h.send({ type: 'START_COMPARISON', batchId: 'batch:1', a: small, b }))).toMatchObject({ accepted: true });
+    h.drain();
+    const all = reports(h);
+    expect(h.replies.filter(reply => reply.payload.type === 'COMPARISON').every(reply => reply.jobId === 'batch:1')).toBe(true);
+    const progress = all.map(report => report.completedPairs);
+    expect(progress).toEqual([...progress].sort((x, y) => x - y));
+    expect(progress.at(-1)).toBe(20);
+    const done = all.at(-1)!;
+    expect(done.status).toBe('completed');
+    expect(done.pairs).toEqual(direct(small, b));
+    expect(done.summary).toEqual(summarize(direct(small, b), false));
+    expect(done.summary!.verdict).toBe('B_LOWER');
+  });
+
+  it('ST-06 A=B gives d=0 for every pair, CI [0;0] and the identical label', () => {
+    const h = harness();
+    h.create(small);
+    h.send({ type: 'START_COMPARISON', batchId: 'batch:1', a: small, b: { ...small, id: 'b', name: 'B' } });
+    h.drain();
+    const done = reports(h).at(-1)!;
+    expect(done.pairs.every(pair => pair.a.meanWaitSec === pair.b.meanWaitSec)).toBe(true);
+    expect(done.summary).toMatchObject({ meanDeltaSec: 0, ci95: [0, 0], verdict: 'IDENTICAL', emptyPairs: 0 });
+  });
+
+  it('refuses unfair demand, a running visual run and visual computation while the batch owns the worker', () => {
+    const h = harness();
+    h.create(small);
+    expect(h.ack(h.send({ type: 'START_COMPARISON', batchId: 'batch:1', a: small, b: { ...small, lambdaPerMinute: 5 } })))
+      .toMatchObject({ accepted: false, code: 'INVALID_INPUT', message: expect.stringContaining('lambdaPerMinute') });
+    h.send({ type: 'RUN' });
+    expect(h.ack(h.send({ type: 'START_COMPARISON', batchId: 'batch:2', a: small, b: small }))).toMatchObject({ code: 'BUSY' });
+    h.send({ type: 'PAUSE_RUN', reason: 'manual' });
+    expect(h.ack(h.send({ type: 'START_COMPARISON', batchId: 'batch:3', a: small, b: small }))).toMatchObject({ accepted: true });
+    for (const command of [{ type: 'RESUME_RUN', source: 'manual' }, { type: 'ADD_MANUAL', count: 1 }, { type: 'FAST_FINISH' }] as Command[]) {
+      expect(h.ack(h.send(command))).toMatchObject({ accepted: false, code: 'BUSY' });
+    }
+    expect(h.ack(h.send({ type: 'START_COMPARISON', batchId: 'batch:4', a: small, b: small }))).toMatchObject({ code: 'BUSY' });
+    h.drain();
+    expect(reports(h).at(-1)).toMatchObject({ batchId: 'batch:3', status: 'completed' });
+    // The parked visual run is untouched and can continue afterwards.
+    expect(h.projection().status).toBe('PAUSED');
+    expect(h.ack(h.send({ type: 'RESUME_RUN', source: 'manual' }))).toMatchObject({ accepted: true, state: { status: 'RUNNING' } });
+  });
+
+  it('SX-12 a hidden suspend mid-pair keeps the checkpoint and resumes to the same result', () => {
+    const b = { ...small, c: 1 };
+    const h = harness();
+    h.create(small);
+    h.send({ type: 'START_COMPARISON', batchId: 'batch:1', a: small, b });
+    for (let slices = 0; slices < 7; slices++) h.tasks.shift()!();
+    expect(h.ack(h.send({ type: 'SUSPEND_COMPARISON', batchId: 'batch:1', reason: 'hidden' }))).toMatchObject({ accepted: true });
+    const before = reports(h).length;
+    h.drain();
+    expect(reports(h)).toHaveLength(before);
+    expect(reports(h).at(-1)!.status).toBe('suspended');
+    expect(h.ack(h.send({ type: 'RESUME_COMPARISON', batchId: 'batch:1' }))).toMatchObject({ accepted: true });
+    h.drain();
+    expect(reports(h).at(-1)!.summary).toEqual(summarize(direct(small, b), false));
+  });
+
+  it('cancel is nonfinal; a completion committed first wins over a late cancel', () => {
+    const h = harness();
+    h.create(small);
+    h.send({ type: 'START_COMPARISON', batchId: 'batch:1', a: small, b: small });
+    h.tasks.shift()!();
+    expect(h.ack(h.send({ type: 'CANCEL_COMPARISON', batchId: 'batch:1' }))).toMatchObject({ accepted: true });
+    h.drain();
+    expect(reports(h).at(-1)).toMatchObject({ status: 'cancelled', summary: null });
+    h.send({ type: 'START_COMPARISON', batchId: 'batch:2', a: small, b: small });
+    h.drain();
+    expect(h.ack(h.send({ type: 'CANCEL_COMPARISON', batchId: 'batch:2' }))).toMatchObject({ accepted: false, code: 'INVALID_STATE' });
+    expect(reports(h).at(-1)).toMatchObject({ batchId: 'batch:2', status: 'completed' });
+  });
+
+  it('one replication over the customer limit invalidates the whole batch; no summary from the rest', () => {
+    const schedule = Array.from({ length: 100 }, (_, entry) => manual(entry, 0, Array.from({ length: 20 }, (_, n) => entry * 20 + n)));
+    const heavy = cfg({ lambdaPerMinute: 20, manualSchedule: schedule });
+    const h = harness();
+    h.create(small);
+    h.send({ type: 'START_COMPARISON', batchId: 'batch:1', a: heavy, b: heavy });
+    h.drain();
+    expect(reports(h).at(-1)).toMatchObject({ status: 'invalid', summary: null, completedPairs: 0, message: expect.stringContaining('Pasangan 1 sisi A') });
+  });
 });
