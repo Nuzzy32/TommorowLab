@@ -33,7 +33,7 @@ async function st01(page: Page) {
   await setField(page, 'Kedatangan otomatis', '0');
   await setField(page, 'Minimum', '10');
   await setField(page, 'Maksimum', '10');
-  await setField(page, 'Durasi', '1');
+  await setField(page, 'Durasi menerima pelanggan', '1');
   await page.locator('#entry-count').fill('3');
   await page.getByRole('button', { name: 'Tambah jadwal' }).click();
 }
@@ -42,27 +42,35 @@ test('UF-01 opens a ready preset without login or camera, with skippable help', 
   await page.goto('/');
   await expect(page).toHaveTitle('TomorrowLab — Laboratorium skenario');
   await expect(page.locator('html')).toHaveAttribute('lang', 'id');
+  const help = page.getByRole('dialog', { name: 'Jalankan percobaan' });
+  await expect(help).toContainText('1 dari 3');
+  await help.getByRole('button', { name: 'Berikutnya' }).click();
+  await expect(page.getByRole('dialog', { name: 'Ubah skenario' })).toContainText('2 dari 3');
+  await page.getByRole('button', { name: 'Berikutnya' }).click();
+  await page.getByRole('button', { name: 'Mulai mencoba' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(primary(page)).toBeFocused();
+
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Jam makan siang');
   await expect(status(page)).toContainText('Siap dijalankan');
   await expect(timer(page)).toHaveText('00:00');
-  for (const [label, value] of [['Loket aktif', '2'], ['Kedatangan otomatis', '4'], ['Minimum', '20'], ['Maksimum', '40'], ['Durasi', '15'], ['Seed', '2026']]) {
+  for (const [label, value] of [['Loket aktif', '2'], ['Kedatangan otomatis', '4'], ['Minimum', '20'], ['Maksimum', '40'], ['Durasi menerima pelanggan', '15'], ['Seed percobaan', '2026']]) {
     await expect(page.getByRole('textbox', { name: label, exact: true })).toHaveValue(value);
   }
   await expect(page.getByRole('radio', { name: '20×' })).toBeChecked();
-  await expect(page.getByText('Permintaan otomatis menyamai atau melebihi kapasitas rata-rata (ρ = 1,00)', { exact: false })).toBeVisible();
+  await expect(page.getByText('Permintaan otomatis menyamai kapasitas rata-rata (ρ = 1,00)', { exact: false })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Mulai mencoba' }).click();
-  await expect(page.getByRole('heading', { name: 'Mulai dalam tiga langkah' })).toHaveCount(0);
-  await expect(primary(page)).toBeFocused();
   await page.getByRole('button', { name: 'Bantuan' }).click();
-  await expect(page.getByRole('heading', { name: 'Mulai dalam tiga langkah' })).toBeFocused();
+  await expect(page.getByRole('dialog', { name: 'Jalankan percobaan' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Asumsi model' }).first().click();
+  await page.getByRole('button', { name: 'Asumsi', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Asumsi model' });
   await expect(dialog).toContainText('FIFO');
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Asumsi model' }).first()).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Asumsi', exact: true })).toBeFocused();
 });
 
 test('UF-04 keyboard run, contextual Space pause/resume and focus kept on the toggled button', async ({ page }) => {
@@ -99,9 +107,9 @@ test('UF-02 rejects invalid input without clamping and focuses the first error o
   const max = page.getByRole('textbox', { name: 'Maksimum', exact: true });
   await expect(page.getByText('Waktu maksimum harus ≥ minimum.')).toBeVisible();
   await expect(max).toHaveAttribute('aria-invalid', 'true');
-  await setField(page, 'Seed', '1.000');
+  await setField(page, 'Seed percobaan', '1.000');
   await expect(page.getByText('Seed harus bilangan bulat 0–4294967295.')).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Seed', exact: true })).toHaveValue('1.000');
+  await expect(page.getByRole('textbox', { name: 'Seed percobaan', exact: true })).toHaveValue('1.000');
 
   await primary(page).click();
   await expect(max).toBeFocused();
@@ -118,26 +126,28 @@ test('UF-02 rejects invalid input without clamping and focuses the first error o
 
 test('ST-01 through the UI: scheduled customers, fast finish, final metrics, replay and reset', async ({ page }) => {
   await st01(page);
-  await expect(page.getByText('3 pelanggan dalam 1 jadwal.')).toBeVisible();
+  await expect(page.getByText('1 entri · 3 pelanggan')).toBeVisible();
   await expect(page.getByText('Tidak ada pelanggan terjadwal.')).toHaveCount(0);
   await primary(page).click();
   await expect(status(page)).toContainText('Berjalan');
   await page.getByRole('button', { name: 'Selesaikan cepat' }).click();
   await expect(status(page)).toContainText('Selesai · hasil final');
-  await expect(metric(page, 'Rata-rata tunggu')).toHaveText('10,00 detik');
+  await expect(metric(page, 'Rata-rata tunggu final')).toHaveText('10,00 detik');
   await expect(metric(page, 'P95 tunggu')).toHaveText('20,00 detik');
-  await expect(metric(page, 'Rata-rata waktu di sistem')).toHaveText('20,00 detik');
-  await expect(metric(page, 'Utilisasi agregat')).toHaveText('50,0%');
-  await expect(metric(page, 'Throughput')).toHaveText('3,00 /menit');
-  await expect(metric(page, 'Antrean maksimum')).toHaveText('2');
-  await expect(metric(page, 'Durasi penyelesaian')).toHaveText('0,00 detik');
+  await expect(metric(page, 'Waktu di sistem')).toHaveText('20,00 detik');
+  await expect(metric(page, 'Utilisasi loket')).toHaveText('50,0%');
+  await expect(metric(page, 'Throughput')).toHaveText('3,00 pel/menit');
+  await expect(metric(page, 'Antrean maksimum')).toHaveText('2 pelanggan');
+  await expect(metric(page, 'Menyelesaikan sisa')).toHaveText('0,00 detik');
+  await expect(page.locator('.queue-chart')).toContainText('puncak 2 pelanggan');
+  await expect(page.getByText('Run selesai · 3 pelanggan')).toBeVisible();
 
   await expect(primary(page)).toHaveText('Ulangi run yang sama');
   await primary(page).click();
   await expect(status(page)).toContainText('Berjalan');
   await page.getByRole('button', { name: 'Selesaikan cepat' }).click();
   await expect(status(page)).toContainText('Selesai · hasil final');
-  await expect(metric(page, 'Rata-rata tunggu')).toHaveText('10,00 detik');
+  await expect(metric(page, 'Rata-rata tunggu final')).toHaveText('10,00 detik');
 
   await page.getByRole('button', { name: 'Reset run' }).click();
   const dialog = page.getByRole('dialog', { name: 'Reset run ini?' });
@@ -148,8 +158,8 @@ test('ST-01 through the UI: scheduled customers, fast finish, final metrics, rep
   await page.getByRole('button', { name: 'Reset run' }).click();
   await dialog.getByRole('button', { name: 'Reset run' }).click();
   await expect(status(page)).toContainText('Siap dijalankan');
-  await expect(page.getByRole('textbox', { name: 'Seed', exact: true })).toHaveValue('2026');
-  await expect(page.getByRole('list', { name: 'Jadwal pelanggan' })).toContainText('00:00');
+  await expect(page.getByRole('textbox', { name: 'Seed percobaan', exact: true })).toHaveValue('2026');
+  await expect(page.getByRole('list', { name: 'Jadwal pelanggan manual' })).toContainText('00:00');
 });
 
 test('UF-05 customers added while paused wait for resume and keep the worker timestamp', async ({ page }) => {
@@ -161,37 +171,37 @@ test('UF-05 customers added while paused wait for resume and keep the worker tim
   await expect(status(page)).toContainText('Dijeda');
   const at = await timer(page).textContent();
   await page.locator('#add-count').fill('3');
-  await page.getByRole('button', { name: 'Tambah pelanggan' }).click();
-  await expect(page.locator('.toolbar .callout')).toHaveText(`3 pelanggan dicatat pada ${at}. Menunggu Lanjutkan, pada waktu jeda.`);
-  await expect(page.getByRole('status')).toHaveText(`3 pelanggan dicatat pada ${at}. Menunggu Lanjutkan, pada waktu jeda.`);
-  const log = page.getByRole('region', { name: 'Tambahan pelanggan selama run' });
+  await page.getByRole('button', { name: 'Tambahkan' }).click();
+  await expect(page.locator('.stage-notice')).toHaveText(`3 pelanggan dicatat pada ${at}. Menunggu Lanjutkan, pada waktu jeda.`);
+  await expect(page.locator('[aria-live="polite"]')).toHaveText(`3 pelanggan dicatat pada ${at}. Menunggu Lanjutkan, pada waktu jeda.`);
+  const log = page.getByRole('region', { name: 'Catatan pelanggan manual' });
   await expect(log).toContainText('Menunggu diproses saat lanjut');
   await expect(page.locator('.counts')).toContainText('Tiba0');
 
   await page.locator('#add-count').fill('21');
-  await page.getByRole('button', { name: 'Tambah pelanggan' }).click();
+  await page.getByRole('button', { name: 'Tambahkan' }).click();
   await expect(page.getByText('Jumlah pelanggan harus bilangan bulat 1–20.')).toBeVisible();
 
   await primary(page).click();
-  await expect(log).toContainText('Manual');
+  await expect(log).toContainText('Saat run');
   await page.getByRole('button', { name: 'Selesaikan cepat' }).click();
   await expect(status(page)).toContainText('Selesai · hasil final');
-  await expect(metric(page, 'Selesai dilayani')).toHaveText('3');
+  await expect(metric(page, 'Pelanggan')).toHaveText('3');
 });
 
 test('UF-03/UF-08 out-of-range schedule blocks the run; Ubah skenario resets into editing', async ({ page }) => {
   await open(page);
-  await setField(page, 'Durasi', '2');
+  await setField(page, 'Durasi menerima pelanggan', '2');
   await page.locator('#entry-minute').fill('1');
   await page.locator('#entry-second').fill('30');
   await page.getByRole('button', { name: 'Tambah jadwal' }).click();
-  await setField(page, 'Durasi', '1');
+  await setField(page, 'Durasi menerima pelanggan', '1');
   await expect(page.getByText('Di luar durasi')).toBeVisible();
   await primary(page).click();
   await expect(page.getByRole('button', { name: /Hapus jadwal 01:30/ })).toBeFocused();
   await expect(page.getByText('Ada jadwal di luar durasi menerima pelanggan', { exact: false })).toBeVisible();
   await page.keyboard.press('Enter');
-  await expect(page.getByText('Belum ada jadwal.', { exact: false })).toBeVisible();
+  await expect(page.locator('.schedule .group-head')).toContainText('Kosong');
 
   await primary(page).click();
   await expect(status(page)).toContainText(/Berjalan|Selesai/);
@@ -230,8 +240,39 @@ for (const width of [360, 640, 768, 1280]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await primary(page).click();
     await expect(status(page)).toContainText('Berjalan');
-    await expect(page.getByRole('button', { name: 'Tambah pelanggan' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Tambahkan' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Selesaikan cepat' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 }
+
+test('3D scene loads lazily, toggles to the compact view and back', async ({ page }) => {
+  await open(page);
+  await expect(page.locator('.scene-canvas')).toBeVisible();
+  await expect(page.getByText('Memuat ruang 3D…')).toHaveCount(0);
+  await primary(page).click();
+  await expect(status(page)).toContainText('Berjalan');
+  await page.getByRole('button', { name: 'Tampilan ringkas' }).click();
+  await expect(page.locator('.scene-canvas')).toHaveCount(0);
+  await expect(page.getByRole('list', { name: 'Status loket' })).toBeVisible();
+  await page.getByRole('button', { name: 'Tampilan 3D' }).click();
+  await expect(page.locator('.scene-canvas')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Putar kanan' }).click();
+  await page.getByRole('button', { name: 'Reset tampilan' }).click();
+});
+
+test('without WebGL the stage falls back to the compact view and the run still works', async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
+      return type.startsWith('webgl') ? null : (original as (...args: unknown[]) => unknown).call(this, type, ...rest);
+    } as typeof original;
+  });
+  await open(page);
+  await expect(page.getByText('Ruang 3D tidak didukung perangkat ini.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Status loket' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Tampilan 3D' })).toHaveCount(0);
+  await primary(page).click();
+  await page.getByRole('button', { name: 'Selesaikan cepat' }).click();
+  await expect(status(page)).toContainText('Selesai · hasil final');
+});

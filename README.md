@@ -2,7 +2,7 @@
 
 Coba skenario. Pahami dampaknya.
 
-SPA statis untuk simulator antrean kantin kampus. Kontrak data, validator, PCG32, core simulasi FIFO dan metrik sudah tersedia sebagai TypeScript murni dengan pengujian numerik. Adapter Web Worker, controller main thread dan workspace dengan kontrol manual (UF-01–08) sudah berjalan: atur skenario dan jadwal, jalankan, jeda, tambah pelanggan, selesaikan cepat, ulangi dan reset, dengan tampilan ringkas (CompactScene) dan hasil final. Scene 3D, perbandingan A/B, simpan/muat konfigurasi dan AirShift belum diimplementasikan.
+SPA statis untuk simulator antrean kantin kampus. Kontrak data, validator, PCG32, core simulasi FIFO dan metrik sudah tersedia sebagai TypeScript murni dengan pengujian numerik. Adapter Web Worker, controller main thread dan workspace dengan kontrol manual (UF-01–08) sudah berjalan: atur skenario dan jadwal, jalankan, jeda, tambah pelanggan, selesaikan cepat, ulangi dan reset, dengan ruang 3D kantin (three.js, dimuat lazy) atau tampilan ringkas, grafik panjang antrean dan hasil final. Tampilan mengikuti arah visual kaca DESIGN_SYSTEM v1.1. Perbandingan A/B, simpan/muat konfigurasi dan AirShift belum diimplementasikan.
 
 ## Menjalankan lokal
 
@@ -43,9 +43,11 @@ Setelah worker/controller (27 Oktober 2026), `npm run check` lulus dengan **504 
 
 Setelah workspace (27 Oktober 2026), `npm run check` lulus dengan **512 tes Vitest pada 8 file**, build produksi (termasuk chunk worker) dan **11 tes e2e Chromium** terhadap `dist/`.
 
+Setelah redesign kaca dan ruang 3D (27 Oktober 2026), `npm run check` lulus dengan **513 tes Vitest pada 8 file**, build produksi (chunk worker dan chunk three.js terpisah) dan **13 tes e2e Chromium** (39/39 saat diulang 3×). Playwright menjalankan Chromium dengan `--enable-unsafe-swiftshader` agar jalur WebGL deterministik.
+
 ## Struktur awal
 
-`src/app/` memuat workspace (`App.tsx`), draft dan validasi form (`draft.ts`), panel parameter, panel run/hasil dan komponen dasar; `src/styles/` token DESIGN_SYSTEM dan CSS, `src/domain/` konfigurasi dan validasi, `src/simulation/` engine/RNG/metrik, `src/workers/` protokol dan runtime worker, `src/controller/` pacing dan lifecycle di main thread, `tests/integration/` protokol/controller, dan `tests/e2e/` alur workspace di browser. Three.js belum dipasang karena belum digunakan.
+`src/app/` memuat workspace (`App.tsx`), draft dan validasi form (`draft.ts`), panel parameter, panel run/hasil dan komponen dasar; `src/styles/` token DESIGN_SYSTEM dan CSS, `src/domain/` konfigurasi dan validasi, `src/simulation/` engine/RNG/metrik, `src/workers/` protokol dan runtime worker, `src/controller/` pacing dan lifecycle di main thread, `src/scene/` ruang 3D kantin (visual saja), `tests/integration/` protokol/controller, dan `tests/e2e/` alur workspace di browser. Font Plus Jakarta Sans/JetBrains Mono di-host sendiri lewat `@fontsource`; ikon dari `@phosphor-icons/react`.
 
 ## Core simulasi
 
@@ -77,7 +79,7 @@ await controller.pauseForHidden(); // panggil dari handler visibilitychange
 
 Runtime worker (`src/workers/runtime.ts`) memproses satu kelompok timestamp per langkah dan yield lewat macrotask setelah 100 kelompok atau ±4 ms. Ia menolak epoch/job lama, tidak pernah mengeksekusi ulang command duplikat (64 reply terakhir disimpan), dan mengirim ACK reset/replay pada epoch lama sebelum snapshot generasi baru. Proyeksi ke UI dibatasi 10 Hz dan paling banyak 150 ID antrean sampel; record pelanggan penuh tetap di worker. Command batch A/B menyusul pada WP-08.
 
-Bukti dan batas pengujian: [core](docs/verification/core-2026-10-26.md), [worker/controller](docs/verification/worker-2026-10-27.md), [workspace](docs/verification/workspace-2026-10-27.md).
+Bukti dan batas pengujian: [core](docs/verification/core-2026-10-26.md), [worker/controller](docs/verification/worker-2026-10-27.md), [workspace](docs/verification/workspace-2026-10-27.md), [redesign dan ruang 3D](docs/verification/redesign-3d-2026-10-27.md).
 
 ## Acuan dan scope berikutnya
 
@@ -88,7 +90,7 @@ Bukti dan batas pengujian: [core](docs/verification/core-2026-10-26.md), [worker
 - [Spesifikasi simulasi](SIMULATION_SPEC.md): model, RNG dan fixture numerik.
 - [Roadmap](ROADMAP.md): tahapan dan gate penerimaan.
 
-Berikutnya: scene 3D Three.js di atas proyeksi yang sama (WP-07), lalu A/B 20 pasangan (WP-08) dan simpan/muat lokal (WP-09). Hasil simulasi tidak boleh digantikan animasi atau angka contoh.
+Berikutnya: A/B 20 pasangan (WP-08) dan simpan/muat lokal (WP-09). Hasil simulasi tidak boleh digantikan animasi atau angka contoh.
 
 Bootstrap lokal tidak menyelesaikan seluruh gate M0: owner/kapasitas tim, perangkat QA, host HTTPS, base path dan kebijakan deployment, serta eligibility/akses submission masih perlu ditetapkan. Smoke Chromium bukan audit aksesibilitas menyeluruh atau verifikasi lintas browser.
 # TommorowLab

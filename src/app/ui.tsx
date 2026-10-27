@@ -1,36 +1,34 @@
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
+import {
+  ArrowArcLeft, ArrowArcRight, ArrowClockwise, ArrowCounterClockwise, ArrowLeft, ArrowRight, CameraSlash, CaretDown, CaretUp,
+  CheckCircle, CircleDashed, Cube, CursorClick, EyeSlash, FastForward, Flask, FrameCorners, HandGrabbing, Hourglass,
+  HourglassMedium, Info, ListBullets, LockSimple, MagnifyingGlassMinus, MagnifyingGlassPlus, Minus, Pause, PencilSimple,
+  PersonSimpleWalk, Play, PlayCircle, Plus, Question, Queue, Shuffle, SlidersHorizontal, Stop, Timer, Trash, UserPlus,
+  UsersThree, Warning, X,
+} from '@phosphor-icons/react';
+import type { Icon as PhosphorIcon, IconWeight } from '@phosphor-icons/react';
 
-// Minimal local glyphs (decorative, aria-hidden); every control carries a text label.
+// Phosphor glyphs are decorative (aria-hidden); every control carries a text label or aria-label.
 const GLYPHS = {
-  play: <path d="M6 4.5v11l9-5.5z" fill="currentColor" stroke="none" />,
-  pause: <path d="M6.5 4.5v11M13.5 4.5v11" strokeWidth="2.5" />,
-  fast: <path d="M3.5 5v10l6-5zM10.5 5v10l6-5z" fill="currentColor" stroke="none" />,
-  reset: <><path d="M4 4.5V8h3.5" /><path d="M4.6 7.5a6 6 0 1 1-.4 4.8" /></>,
-  replay: <><path d="M16 4.5V8h-3.5" /><path d="M15.4 7.5a6 6 0 1 0 .4 4.8" /></>,
-  plus: <path d="M10 4.5v11M4.5 10h11" />,
-  minus: <path d="M4.5 10h11" />,
-  stop: <rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" />,
-  info: <><circle cx="10" cy="10" r="7" /><path d="M10 9v5M10 6.2v.1" /></>,
-  lock: <><rect x="4.5" y="9" width="11" height="7.5" rx="1.5" /><path d="M7 9V6.5a3 3 0 0 1 6 0V9" /></>,
-  trash: <path d="M4.5 6h11M8 6V4.5h4V6M6 6l.7 9.5h6.6L14 6" />,
-  warning: <><path d="M10 3.5l7 12.5H3z" /><path d="M10 8.5v3.5M10 14v.1" /></>,
-  check: <path d="M4.5 10.5l3.5 3.5 7.5-8" />,
-};
+  play: Play, pause: Pause, fast: FastForward, reset: ArrowCounterClockwise, replay: ArrowClockwise, plus: Plus, minus: Minus,
+  stop: Stop, info: Info, lock: LockSimple, trash: Trash, warning: Warning, check: CheckCircle, help: Question, userPlus: UserPlus,
+  pencil: PencilSimple, cube: Cube, list: ListBullets, rotateLeft: ArrowArcLeft, rotateRight: ArrowArcRight, zoomIn: MagnifyingGlassPlus,
+  zoomOut: MagnifyingGlassMinus, frame: FrameCorners, grab: HandGrabbing, hidden: EyeSlash, hourglass: Hourglass, idle: CircleDashed,
+  close: X, next: ArrowRight, back: ArrowLeft, sliders: SlidersHorizontal, playCircle: PlayCircle, cursor: CursorClick, flask: Flask,
+  users: UsersThree, timer: Timer, queue: Queue, drain: HourglassMedium, walk: PersonSimpleWalk, shuffle: Shuffle,
+  cameraOff: CameraSlash, caretDown: CaretDown, caretUp: CaretUp,
+} satisfies Record<string, PhosphorIcon>;
 export type IconName = keyof typeof GLYPHS;
 
-export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
-  return (
-    <svg className="icon" width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor"
-      strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-      {GLYPHS[name]}
-    </svg>
-  );
+export function Icon({ name, size = 17, weight = 'bold' }: { name: IconName; size?: number; weight?: IconWeight }) {
+  const Glyph = GLYPHS[name];
+  return <Glyph className="icon" size={size} weight={weight} aria-hidden="true" focusable="false" />;
 }
 
 /** Native modal dialog: focus trap, inert background and Escape come from the platform. */
-export function Dialog({ open, title, description, onClose, children, actions }: {
-  open: boolean; title: string; description?: ReactNode; onClose: () => void; children?: ReactNode; actions: ReactNode;
+export function DialogShell({ open, onClose, className = 'dialog', labelledBy, describedBy, children }: {
+  open: boolean; onClose: () => void; className?: string; labelledBy: string; describedBy?: string; children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const returnTo = useRef<HTMLElement | null>(null);
@@ -42,21 +40,31 @@ export function Dialog({ open, title, description, onClose, children, actions }:
       dialog.showModal();
     } else if (!open && dialog.open) dialog.close();
     if (!open && returnTo.current) {
-      // Return focus to the trigger; if it disappeared, to the main heading.
+      // Return focus to the trigger; if it disappeared, to the scenario heading.
       const target = returnTo.current.isConnected && !returnTo.current.matches(':disabled') ? returnTo.current : document.getElementById('workspace-title');
       returnTo.current = null;
       target?.focus();
     }
   }, [open]);
+  return (
+    <dialog ref={ref} className={className} aria-labelledby={labelledBy} aria-describedby={describedBy}
+      onClose={() => { if (open) onClose(); }}>
+      {children}
+    </dialog>
+  );
+}
+
+export function Dialog({ open, title, description, onClose, children, actions, className }: {
+  open: boolean; title: string; description?: ReactNode; onClose: () => void; children?: ReactNode; actions: ReactNode; className?: string;
+}) {
   const id = title.replace(/\W+/g, '-').toLowerCase();
   return (
-    <dialog ref={ref} className="dialog" aria-labelledby={`${id}-title`} aria-describedby={description ? `${id}-desc` : undefined}
-      onClose={() => { if (open) onClose(); }}>
+    <DialogShell open={open} onClose={onClose} className={className} labelledBy={`${id}-title`} describedBy={description ? `${id}-desc` : undefined}>
       <h2 id={`${id}-title`}>{title}</h2>
       {description && <div id={`${id}-desc`} className="dialog-description">{description}</div>}
       {children}
       <div className="dialog-actions">{actions}</div>
-    </dialog>
+    </DialogShell>
   );
 }
 
@@ -66,20 +74,20 @@ export function ConfirmDialog({ open, title, description, confirmLabel, onCancel
   return (
     <Dialog open={open} title={title} description={description} onClose={onCancel} actions={<>
       {/* Initial focus on Batal for every destructive confirmation. */}
-      <button type="button" className="button secondary" autoFocus onClick={onCancel}>Batal</button>
+      <button type="button" className="button" autoFocus onClick={onCancel}>Batal</button>
       <button type="button" className="button danger-solid" onClick={onConfirm}>{confirmLabel}</button>
     </>} />
   );
 }
 
-export function NumberField({ id, label, unit, value, error, hint, disabled, decimal, onChange, onCommit, before, after }: {
-  id: string; label: string; unit?: string; value: string; error?: string; hint?: ReactNode; disabled?: boolean; decimal?: boolean;
-  onChange: (value: string) => void; onCommit: () => void; before?: ReactNode; after?: ReactNode;
+export function NumberField({ id, label, aside, unit, value, error, hint, disabled, decimal, onChange, onCommit, before, after, className }: {
+  id: string; label: ReactNode; aside?: ReactNode; unit?: string; value: string; error?: string; hint?: ReactNode; disabled?: boolean; decimal?: boolean;
+  onChange: (value: string) => void; onCommit: () => void; before?: ReactNode; after?: ReactNode; className?: string;
 }) {
   const describedBy = [hint ? `${id}-hint` : '', error ? `${id}-error` : ''].filter(Boolean).join(' ') || undefined;
   return (
-    <div className="field">
-      <label id={`${id}-label`} htmlFor={id}>{label}</label>
+    <div className={className ? `field ${className}` : 'field'}>
+      <div className="field-head"><label id={`${id}-label`} htmlFor={id}>{label}</label>{aside && <span>{aside}</span>}</div>
       <div className="field-row">
         {before}
         <div className={`field-control${error ? ' invalid' : ''}`}>
@@ -92,7 +100,7 @@ export function NumberField({ id, label, unit, value, error, hint, disabled, dec
         {after}
       </div>
       {hint && <p id={`${id}-hint`} className="field-hint">{hint}</p>}
-      {error && <p id={`${id}-error`} className="field-error"><Icon name="warning" size={16} />{error}</p>}
+      {error && <p id={`${id}-error`} className="field-error"><Icon name="warning" size={14} />{error}</p>}
     </div>
   );
 }

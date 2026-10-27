@@ -1,15 +1,17 @@
 # TomorrowLab — Design System
 
-**Versi 1.0 · 26 Oktober 2026 · Bahasa Indonesia**
+**Versi 1.1 · 27 Oktober 2026 · Bahasa Indonesia**
+
+> **Perubahan 1.1 (27 Oktober 2026):** arah visual diganti mengikuti mockup workspace yang dipilih pemilik produk: panel kaca (glass) di atas latar bidang warna lembut, font Plus Jakarta Sans + JetBrains Mono yang di-host sendiri, ikon Phosphor, dan ruang 3D kantin yang representatif (dapur, area makan, pintu masuk). Bagian 2.1, 3.2–3.6, 4.2, CMP-06, CMP-08, §11 dan §14 diperbarui; kontrak state, aksesibilitas dan kejujuran angka tidak berubah.
 
 | Atribut | Nilai |
 |---|---|
-| Status | Spesifikasi desain untuk implementasi; belum merupakan UI yang sudah dibangun atau lulus audit |
+| Status | Diimplementasikan untuk workspace (WP-06/07); belum lulus audit aksesibilitas menyeluruh |
 | Basis produk | TomorrowLab PRD v1.0, MVP LaunchPad Hacks 2026 |
 | Pendamping | [USER_FLOW.md](USER_FLOW.md) |
 | Acuan kebutuhan | [PRD v1.0](/Users/adrian/Documents/Codex/2026-10-26/referenced-chatgpt-conversation-this-is-an/outputs/PRD.md) |
 | Fokus | Workspace simulasi antrean kantin desktop-first; kontrol manual lengkap; AirShift opsional |
-| Arah visual | **Laboratorium editorial:** hangat, presisi, lapang, dan mudah dibaca |
+| Arah visual | **Laboratorium kaca:** lembut, presisi, lapang, dan mudah dibaca |
 | Tema MVP | Light mode tunggal; tidak membangun dark mode pada tahap ini |
 
 ## 1. Tujuan, batas, dan otoritas
@@ -35,7 +37,7 @@ Dokumen tidak menetapkan framework, membuat arsitektur, mengganti model antrean,
 
 ### 2.1 Karakter visual
 
-TomorrowLab terasa seperti meja kerja eksperimen: permukaan putih di atas latar bone, struktur tipis, tipografi UI tegas, angka tabular, serta aksen evergreen. Heading editorial dipakai terbatas pada identitas produk dan judul workspace. Tidak memakai gradasi, neon, efek kaca, bayangan berat, background video atau dekorasi yang bergerak terus.
+TomorrowLab terasa seperti meja kerja eksperimen yang tenang: panel kaca putih semi-transparan (blur + saturasi) di atas latar hijau pucat dengan tiga bidang warna radial lembut (mint, biru, krem), sudut membulat besar, angka tabular monospace, serta aksen evergreen. Gradasi hanya dipakai untuk bidang latar, isi progress bar dan kartu hero hasil final. Tidak memakai neon, background video atau dekorasi yang bergerak terus. Teks selalu berada di permukaan dengan opasitas putih ≥56% (panel) atau ≥62% (kartu), sehingga kontras tidak bergantung pada warna latar di belakang kaca.
 
 Nama ditulis **TomorrowLab**, dengan kapital T dan L. Tagline bila ruang cukup: **“Coba skenario. Pahami dampaknya.”** Wordmark berupa teks; tidak menjadikan logo baru sebagai dependensi rilis. Minimum ukuran wordmark 20 px; sisakan ruang kosong 12 px di semua sisi. Pada layar kecil, tagline disembunyikan dan nama tetap terbaca.
 
@@ -65,50 +67,51 @@ Gunakan `--tl-{kategori}-{peran}` sebagai nama token CSS. Komponen memakai token
 
 | Token | Nilai | Pemakaian |
 |---|---|---|
-| `--tl-color-canvas` | `#F7F6F3` | Latar workspace |
-| `--tl-color-surface` | `#FFFFFF` | Panel, dialog dan kontrol |
-| `--tl-color-surface-subtle` | `#EFEFE9` | Area sekunder, header tabel |
-| `--tl-color-text` | `#202722` | Teks utama dan angka |
-| `--tl-color-text-muted` | `#59635D` | Deskripsi dan metadata yang tetap bermakna |
+| `--tl-color-canvas` | `#EAF0EC` | Latar halaman di bawah bidang warna |
+| `--tl-color-glass` | `rgb(255 255 255 / 56%)` + `blur(24px) saturate(180%)` | Panel utama (header, status, skenario, panggung, hasil, catatan) |
+| `--tl-color-card` | `rgb(255 255 255 / 62%)` + border `#FFFFFF` | Kartu metrik, baris jadwal, kartu loket |
+| `--tl-color-field` | `rgb(255 255 255 / 88%)` | Isi input |
+| `--tl-color-text` | `#17221E` | Teks utama dan angka |
+| `--tl-color-text-body` | `#2C3A34` | Paragraf dan isi kartu |
+| `--tl-color-text-muted` | `#45544E` | Label metrik dan legend |
+| `--tl-color-text-subtle` | `#52615B` | Hint, catatan metrik, metadata |
 | `--tl-color-text-inverse` | `#FFFFFF` | Teks di atas primary/danger solid |
-| `--tl-color-border-subtle` | `#DEDFD8` | Divider dekoratif; bukan satu-satunya batas input |
-| `--tl-color-border-control` | `#7A847D` | Batas kontrol, checkbox dan track slider |
-| `--tl-color-primary` | `#245D49` | CTA utama, selected control |
-| `--tl-color-primary-hover` | `#1D4B3B` | Hover primary |
-| `--tl-color-primary-pressed` | `#173D30` | Pressed primary |
-| `--tl-color-focus` | `#1F5EA8` | Ring fokus keyboard |
-| `--tl-color-success-text` | `#246146` | Keberhasilan atau penurunan wait yang didukung CI |
-| `--tl-color-success-bg` | `#EAF3ED` | Permukaan keberhasilan |
-| `--tl-color-warning-text` | `#795100` | Peringatan overload atau konsekuensi |
-| `--tl-color-warning-bg` | `#FBF3DB` | Permukaan warning |
-| `--tl-color-danger-text` | `#9D3434` | Error dan destructive action |
-| `--tl-color-danger-bg` | `#FBEDEC` | Error inline dan banner |
-| `--tl-color-info-text` | `#305C8A` | Informasi, progress atau hasil belum meyakinkan |
-| `--tl-color-info-bg` | `#EDF3FB` | Permukaan informasi |
-| `--tl-color-disabled-bg` | `#ECEFEA` | Kontrol nonaktif |
-| `--tl-color-disabled-text` | `#59635D` | Label nonaktif tetap dapat dibaca |
-| `--tl-color-overlay` | `rgb(32 39 34 / 36%)` | Backdrop modal |
+| `--tl-color-border-subtle` | `rgb(23 34 30 / 10%)` | Divider dekoratif; bukan satu-satunya batas input |
+| `--tl-color-border-button` | `rgb(23 34 30 / 16%)` | Tombol sekunder (label teks memberi bentuk) |
+| `--tl-color-border-control` | `rgb(23 34 30 / 50%)` | Batas input; ≥3:1 terhadap isi field |
+| `--tl-color-primary` | `#1F6F57` | CTA utama, selected control |
+| `--tl-color-primary-hover` | `#1A5F4A` | Hover primary |
+| `--tl-color-primary-pressed` | `#164F3E` | Pressed primary |
+| `--tl-color-focus` | `#2459A8` | Ring fokus keyboard |
+| `--tl-color-success-text` / `-bg` | `#1A5C44` / `#D9F0E4` | Final, Melayani |
+| `--tl-color-warning-text` / `-bg` | `#6B4800` / `#FBEFCF` | Dijeda, overload, pending |
+| `--tl-color-danger-text` / `-bg` | `#9D3434` / `#FBEDEC` | Error dan destructive action |
+| `--tl-color-info-text` / `-bg` | `#1F4E7E` / `#DDEBFA` | Berjalan, Sementara |
+| `--tl-color-disabled-bg` | `rgb(23 34 30 / 7%)` | Kontrol nonaktif |
+| `--tl-color-disabled-text` | `#52615B` | Label nonaktif tetap dapat dibaca |
+| `--tl-color-overlay` | `rgb(23 34 30 / 22%)` + `blur(6px)` | Backdrop modal |
 
 Link memakai primary, underline selalu terlihat dalam body copy. Border-subtle hanya menyusun area; input dan tombol secondary memakai border-control bila bentuk kontrol dibutuhkan untuk memahami operasinya. Disabled tidak ditentukan oleh opacity seluruh komponen.
 
 ### 3.3 Pasangan kontras yang diperiksa
 
-Rasio berikut dihitung dari nilai sRGB solid token. Angka dibulatkan dua desimal; pengujian implementasi tetap diperlukan untuk opacity, overlay, anti-aliasing, state dan background sebenarnya. Rujukan kontras mengacu WCAG [S1].
+Rasio berikut dihitung terhadap latar efektif terburuk: kaca 56% di atas bidang biru `#BED6EC` (≈`#E2EDF7`) dan kartu 62% di atasnya (≈`#F4F8FC`). Angka dibulatkan dua desimal; pengujian implementasi tetap diperlukan untuk opacity, overlay, anti-aliasing, state dan background sebenarnya. Rujukan kontras mengacu WCAG [S1].
 
 | Foreground / background | Rasio | Penggunaan |
 |---|---:|---|
-| text / surface | 15,28:1 | Body dan angka |
-| text-muted / surface | 6,24:1 | Label sekunder |
-| text-muted / canvas | 5,77:1 | Metadata pada workspace |
-| white / primary | 7,67:1 | Tombol Jalankan |
-| white / primary-hover | 9,90:1 | Hover tombol |
-| focus / surface | 6,51:1 | Ring fokus dengan gap putih |
-| border-control / surface | 3,87:1 | Batas komponen |
-| border-control / canvas | 3,58:1 | Batas kontrol pada canvas |
+| text / kaca | 13,78:1 | Body dan angka |
+| text-muted / kaca | 6,72:1 | Label sekunder |
+| text-subtle / kaca | 5,49:1 | Hint dan metadata |
+| primary / kaca | 5,10:1 | Link dan ikon aksen |
+| white / primary | 6,05:1 | Tombol Jalankan |
+| white / primary-hover | 7,55:1 | Hover tombol |
+| focus / kaca | 5,76:1 | Ring fokus |
+| border-control / field | 3,22:1 | Batas input |
+| disabled-text / disabled-bg | 5,34:1 | Kontrol nonaktif |
 | danger-text / danger-bg | 6,20:1 | Error |
-| warning-text / warning-bg | 6,34:1 | Warning |
-| success-text / success-bg | 6,45:1 | Konfirmasi |
-| info-text / info-bg | 6,22:1 | Informasi |
+| warning-text / warning-bg | 7,19:1 | Warning |
+| success-text / success-bg | 6,60:1 | Konfirmasi |
+| info-text / info-bg | 7,08:1 | Informasi |
 
 ### 3.4 Warna data A/B dan scene
 
@@ -116,33 +119,29 @@ Rasio berikut dihitung dari nilai sRGB solid token. Angka dibulatkan dua desimal
 |---|---|---|
 | `--tl-data-a` | `#245D49` | Baseline A; garis solid, marker bulat, label A |
 | `--tl-data-b` | `#3E5C97` | Kandidat B; garis putus-putus, marker persegi, label B |
-| `--tl-scene-floor` | `#E8E5DC` | Lantai scene hangat |
-| `--tl-scene-counter` | `#D7DDD5` | Loket idle, selalu berlabel Loket 1..6 |
-| `--tl-scene-waiting` | `#E8C86F` | Avatar waiting, marker cincin + angka agregat |
-| `--tl-scene-serving` | `#659784` | Avatar inService, marker solid + status teks loket |
-| `--tl-scene-outline` | `#35473D` | Outline dan marker objek terpilih |
+| `--tl-scene-waiting` | `#EDC35A` (tepi `#C8961E`) | Avatar menunggu, marker cincin + angka agregat |
+| `--tl-scene-serving` | `#2E8B6C` | Avatar dilayani, loket aktif + status teks loket |
+| `--tl-scene-manual` | `#4C5FD5` | Penanda kecil di atas kepala pelanggan tambahan manual |
+| `--tl-scene-idle` | `#DDE6E1` | Loket kosong |
 
-Warna scene adalah material visual; pencahayaan dapat mengubah warna terender. Label antarmuka menggunakan DOM/surface solid, tidak menaruh teks kecil langsung pada material 3D. Pemilihan A/B tidak menyatakan pemenang. Verdict penurunan/kenaikan wait adalah status terpisah dengan teks dan CI.
+Warna scene adalah material visual; pencahayaan dapat mengubah warna terender. Status loket memakai label DOM (L1 · Melayani/Kosong) yang mengikuti posisi loket. Nama zona besar (Dapur, Antrean, Area makan, Pintu masuk, Gudang, Wastafel, Keluar) boleh tertulis di lantai sebagai orientasi; informasi yang dibutuhkan tetap tersedia sebagai teks DOM. Pemilihan A/B tidak menyatakan pemenang. Verdict penurunan/kenaikan wait adalah status terpisah dengan teks dan CI.
 
 ### 3.5 Tipografi
 
-Tidak mewajibkan unduhan font untuk MVP. Gunakan font sistem agar startup tetap ringan; substitusi font di sistem operasi berbeda diperiksa untuk wrapping dan alignment.
+Font di-host sendiri dari paket `@fontsource` (subset latin, woff2) sehingga tidak ada request ke layanan font eksternal; fallback ke font sistem bila belum termuat.
 
 | Token | Family / ukuran / weight / line-height | Peran |
 |---|---|---|
-| `--tl-font-ui` | `system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` | Kontrol, body, tabel |
-| `--tl-font-editorial` | `Georgia, "Times New Roman", serif` | Wordmark/heading workspace terbatas |
-| `--tl-font-mono` | `ui-monospace, "SFMono-Regular", Consolas, monospace` | Seed, timer, shortcut |
-| `--tl-type-title` | Editorial 32 / 400 / 38 px | Judul workspace, satu per tampilan |
-| `--tl-type-heading` | UI 20 / 600 / 28 px | Judul panel utama |
-| `--tl-type-subheading` | UI 16 / 600 / 24 px | Subkelompok parameter |
-| `--tl-type-body` | UI 16 / 400 / 24 px | Deskripsi, bantuan |
-| `--tl-type-control` | UI 14 / 600 / 20 px | Tombol, label field |
-| `--tl-type-meta` | UI 13 / 400 / 20 px | Catatan unit/versi; bukan angka utama |
-| `--tl-type-metric` | UI 28 / 600 / 34 px | Nilai metrik utama |
-| `--tl-type-timer` | Mono 16 / 500 / 24 px | Waktu simulasi |
+| `--tl-font-ui` | `"Plus Jakarta Sans", system-ui, sans-serif` (400–800) | Kontrol, body, heading, wordmark |
+| `--tl-font-mono` | `"JetBrains Mono", ui-monospace, monospace` (500–600) | Timer, angka metrik, input angka, seed, waktu jadwal |
+| Wordmark | UI 21 / 800, “Tomorrow” + “Lab” evergreen | Header |
+| Judul panel | UI 17 / 700 / 1,2 | Skenario, Hasil |
+| Label field/metrik | UI 12–13 / 600 | Field, metrik, legend |
+| Hint/catatan | UI 11–12 / 500 / 1,4 | Catatan metrik, hint field |
+| Timer | Mono 28 / 600 | Waktu simulasi |
+| Metrik | Mono 22 / 600 (hero final 44) | Nilai metrik; unit UI 12 terpisah |
 
-Teks informatif minimum 13 px; body bantuan panjang tetap 16 px. Gunakan `font-variant-numeric: tabular-nums` untuk semua angka metrik dan tabel, serta `lining-nums` bila tersedia. Jangan memakai ALL CAPS untuk kalimat; label mikro seperti “A” tetap singkat. Heading dapat mengecil ke 28 px pada mobile, sedangkan ukuran kontrol dipertahankan.
+Teks hint minimum 12 px dan catatan metrik 11 px dengan kontras ≥5,4:1; body bantuan 15 px. Gunakan `font-variant-numeric: tabular-nums` untuk semua angka metrik dan tabel, serta `lining-nums` bila tersedia. Jangan memakai ALL CAPS untuk kalimat; label mikro seperti “A” tetap singkat. Heading dapat mengecil ke 28 px pada mobile, sedangkan ukuran kontrol dipertahankan.
 
 ### 3.6 Spacing, dimensi dan bentuk
 
@@ -150,16 +149,18 @@ Teks informatif minimum 13 px; body bantuan panjang tetap 16 px. Gunakan `font-v
 |---|---|---|
 | `--tl-space-1/2/3/4` | 4 / 8 / 12 / 16 px | Ikon-label, unit, antarfield |
 | `--tl-space-5/6/8/10/12` | 20 / 24 / 32 / 40 / 48 px | Panel dan kelompok |
-| `--tl-radius-control` | 6 px | Tombol dan input |
-| `--tl-radius-panel` | 12 px | Scene/panel workspace |
-| `--tl-radius-dialog` | 12 px | Dialog dan drawer |
-| `--tl-radius-tag` | 4 px | Status/seri tag |
+| `--tl-radius-control` | 10–13 px | Input 10, tombol 13 |
+| `--tl-radius-card` | 14 px | Kartu metrik dan baris |
+| `--tl-radius-inner` | 20 px | Kotak scene |
+| `--tl-radius-panel` | 24 px | Panel kaca |
+| `--tl-radius-dialog` | 26–30 px | Dialog; drawer menempel tepi kanan |
+| `--tl-radius-tag` | 6 px; badge status pil 999 px | Status/seri tag |
 | `--tl-border-width` | 1 px | Permukaan dan kontrol |
 | `--tl-control-height` | min 44 px | Tombol/input default; tinggi boleh bertambah saat teks wrap |
 | `--tl-control-compact-height` | min 36 px | Utility desktop; hit target minimal 36×36 px |
 | `--tl-focus-width/gap` | 2 / 2 px | Outline keyboard; gap surface solid |
-| `--tl-shadow-overlay` | `0 8px 32px rgb(32 39 34 / 4%)` | Hanya dialog/drawer; backdrop memberi pemisahan utama |
-| `--tl-shadow-panel` | none | Panel datar dengan border |
+| `--tl-shadow-panel` | `inset 0 1px 0 rgb(255 255 255 / 95%), 0 20px 50px -24px rgb(22 58 48 / 28%)` | Panel kaca |
+| `--tl-shadow-overlay` | `inset 0 1px 0 #fff, 0 40px 90px -30px rgb(22 58 48 / 50%)` | Dialog/drawer |
 
 Touch target standar 44×44 px. Minimum 24×24 CSS px atau spacing yang memenuhi kriteria WCAG hanya untuk konteks padat yang sudah diuji; tidak menjadi ukuran default tombol. Tombol ikon memakai area klik 44 px meski glyph 20 px.
 
@@ -194,12 +195,11 @@ Tab “Bandingkan” memakai workspace yang sama. “Tersimpan” adalah drawer,
 
 | Rentang viewport | Layout | Detail |
 |---|---|---|
-| ≥1600 px | 3 kolom, max workspace 1600 px terpusat | Margin minimum 32; konfigurasi 300; hasil 300; gap 20; stage fleksibel |
-| 1280–1599 px | 3 kolom | Margin 24; konfigurasi 272; hasil 260; gap 16; stage min-width:0 |
-| 768–1279 px | Satu kolom utama + panel lipat | Margin 20; status/toolbar tetap di alur; konfigurasi accordion; scene kemudian ringkasan hasil |
-| 360–767 px | Satu kolom | Margin 16; header wrap; scene default collapsed dengan tombol Tampilkan 3D; semua tugas tetap ada |
+| ≥1240 px | 3 kolom, max 1600 px terpusat | Area `status` penuh; `config` 290 · `stage` fleksibel · `results` 320; `log` di bawah stage; gap 16 |
+| 760–1239 px | 2 kolom | `status` dan `stage` penuh; `config` dan `results` berdampingan; `log` di bawah config |
+| <760 px | 1 kolom | Urutan status → skenario (dilipat dengan ringkasan “2 loket · 4/mnt”) → panggung → hasil → catatan; tombol header ikon saja dengan nama aksesibel |
 
-Pada lebar 1280 px, konten 1232 px minus panel 272+260 dan dua gap 16 menyisakan stage 668 px. Stage default desktop memakai rasio 4:3, minimum tinggi 320 px; tidak memaksa seluruh workspace muat dalam satu layar 720 px. Scroll vertikal diperbolehkan. Pada tablet scene setinggi 320 px; mobile 240 px bila dibuka.
+Scene memakai rasio 16:9 dengan tinggi minimum 300 px (240 px di ponsel). Tombol “Tampilan ringkas” selalu tersedia; perangkat tanpa WebGL langsung memakai tampilan ringkas. Scroll vertikal diperbolehkan.
 
 Hindari mengunci `height:100vh` yang memotong isi. Layout utama memakai document scroll; hanya daftar panjang drawer yang boleh mempunyai area scroll terbatas dengan header/footer jelas. Konten pada 200% zoom mengikuti lebar viewport CSS hasil zoom, bukan memaksa layout desktop. Aksi inti tidak tertutup footer sticky atau keyboard virtual.
 
@@ -304,7 +304,7 @@ READY netral; RUNNING info; PAUSED warning; COMPLETED success; ERROR/LIMIT_REACH
 
 ### CMP-06 — SceneViewport dan CameraControls
 
-Scene memakai sudut pandang ortografis/isometrik yang konsisten, lantai matte hangat, loket berlabel, satu jalur antrean dan avatar sederhana. Default seluruh 1–6 loket masuk frame. Jangan menambahkan meja, menu, jarak berjalan, atau dekorasi yang menyiratkan faktor yang belum dimodelkan. Model boleh tampil representatif tanpa memakai skala meter.
+Scene adalah denah kantin 3D representatif (three.js, dimuat lazy): dinding, dapur, 1–6 loket berlabel, satu jalur antrean bersama berpagar, pintu masuk, area makan, gudang dan wastafel. Avatar kapsul berjalan dari pintu ke antrean, ke loket, lalu ke kursi dan keluar. Bagian setelah loket (makan, keluar) dan seluruh jarak berjalan murni visual; AssumptionPanel menyatakannya secara eksplisit dan angka selalu berasal dari engine. Paling banyak 40 avatar antrean digambar; sisanya ditulis “X pelanggan diringkas”. Default seluruh loket masuk frame; seret untuk memutar, pinch/Ctrl+scroll untuk zoom (scroll biasa tetap menggulir halaman), klik ganda untuk reset.
 
 CameraControls: pan kiri/kanan/atas/bawah, rotate kiri/kanan, zoom +/− dan Reset tampilan. Tombol keyboard-native; tidak mengambil alih arrow global. Scroll halaman tidak dipakai zoom kecuali pengguna sengaja memberi fokus/mode kontrol scene yang dijelaskan. Batas zoom/rotate mencegah scene hilang; Reset tampilan selalu memulihkan frame default tanpa mengubah simulasi.
 
@@ -318,7 +318,7 @@ Tombol “Tampilan ringkas” tersedia meski WebGL berhasil. Tampilkan arrived/w
 
 ### CMP-08 — MetricBlock
 
-Metrik ditampilkan sebagai kelompok tipografi dengan divider, bukan setiap nilai menjadi kartu promosi. Urutan utama: rata-rata tunggu → waiting saat ini → completed → utilization; metrik lain di detail. Label unit dan denominator langsung terkait nilai.
+Metrik ditampilkan sebagai kartu kecil dalam grid auto-fill (min 128 px): label, angka monospace + unit, catatan penyebut. Hasil final punya satu kartu hero (rata-rata tunggu final), lalu kelompok “Seluruh pelanggan percobaan” dan “Selama menerima pelanggan”, bar utilisasi per loket, dan grafik langkah panjang antrean (puncak per bin, dihitung worker dari catatan pelanggan) dengan garis batas kedatangan. Urutan utama: rata-rata tunggu → waiting saat ini → completed → utilization; metrik lain di detail. Label unit dan denominator langsung terkait nilai.
 
 | Kondisi | Nilai | Penanda wajib |
 |---|---|---|
@@ -477,7 +477,7 @@ Empty state memakai ikon standar dan teks; tidak membutuhkan ilustrasi custom. U
 
 ## 11. Ikon, scene dan kebijakan aset
 
-Keluarga ikon baseline **Phosphor**, weight bold untuk glyph kecil dan regular bila label visual membutuhkan detail. Pilih satu weight per kelompok; ukuran 20 px pada tombol 44 px dan 16 px untuk metadata. Referensi keluarga resmi [S4]; implementasi memeriksa lisensi paket/versi yang benar-benar dipakai, serta hanya menyertakan ikon yang diperlukan sebagai SVG lokal.
+Keluarga ikon **Phosphor** melalui paket `@phosphor-icons/react` (MIT), weight bold untuk glyph kecil, fill untuk ikon tombol utama, duotone untuk ilustrasi bantuan. Pilih satu weight per kelompok; ukuran 20 px pada tombol 44 px dan 16 px untuk metadata. Referensi keluarga resmi [S4]; implementasi memeriksa lisensi paket/versi yang benar-benar dipakai, serta hanya menyertakan ikon yang diperlukan sebagai SVG lokal.
 
 | Makna | Bentuk ikon |
 |---|---|
@@ -561,7 +561,7 @@ Checklist ini perlu dijalankan pada UI yang dibangun. Rasio token telah dihitung
 
 ## 14. Keputusan baseline dan pengembangan berikutnya
 
-**Dikunci untuk handoff v1.0:** light workspace bone/white/evergreen; native font stack; struktur single workspace; label Indonesia; manual completeness; semantic state; teks alternatif scene; A/B 20 pasangan; glyph SVG standar; tidak ada ketergantungan artwork baru untuk MVP.
+**Dikunci untuk v1.1:** light workspace kaca/evergreen; Plus Jakarta Sans + JetBrains Mono self-hosted; ruang 3D kantin representatif dengan tampilan ringkas sebagai alternatif; struktur single workspace; label Indonesia; manual completeness; semantic state; teks alternatif scene; A/B 20 pasangan; glyph SVG standar; tidak ada ketergantungan artwork baru untuk MVP.
 
 **Diperiksa saat implementasi:** wrapping font sistem aktual; rendering material di GPU target; camera controls; library icon yang sudah dipilih proyek; breakpoint pada konten nyata; screen reader/browser; kinerja dengan jumlah avatar tinggi; integrasi AirShift dan gate kualitasnya.
 

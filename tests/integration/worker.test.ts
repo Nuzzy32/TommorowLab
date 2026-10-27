@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG } from '../../src/domain/config';
 import type { ManualEntry, ScenarioConfig } from '../../src/domain/config';
-import { createSimulation } from '../../src/simulation/engine';
+import { createFixtureSimulation, createSimulation } from '../../src/simulation/engine';
+import { queuePeaks } from '../../src/workers/protocol';
 import type { Ack, Command, Projection, Reply, ReplyEnvelope } from '../../src/workers/protocol';
 import { createWorkerRuntime } from '../../src/workers/runtime';
 
@@ -220,6 +221,7 @@ describe('cooperative slices, interruption and live timestamps', () => {
     for (const key of ['meanQueue', 'utilization', 'throughputPerMinute', 'maxQueue'] as const) {
       close(worker.result!.horizonMetrics[key], expected.result!.horizonMetrics[key]);
     }
+    expect(Math.max(...worker.queuePeaks.peaks)).toBe(worker.result!.horizonMetrics.maxQueue);
   });
 });
 
@@ -280,4 +282,17 @@ it('projection caps the avatar sample at 150 and keeps canonical counts', () => 
   expect(projection.waitingSample[0]).toBe('m:2');
   expect(projection.summarizedWaiting).toBe(50);
   expect(projection).not.toHaveProperty('customers');
+});
+
+it('queue peaks are exact post-dispatch levels per bin (ST-01) and only fill elapsed bins', () => {
+  const st01 = createFixtureSimulation(cfg({ c: 1, lambdaPerMinute: 0, serviceMinSec: 10, serviceMaxSec: 10, horizonSec: 60, manualSchedule: [] }),
+    [0, 0, 0].map(atSimSec => ({ atSimSec, serviceSec: 10 })));
+  st01.start();
+  const done = st01.finish();
+  const series = queuePeaks(done.customers, 60, done.simTimeSec);
+  expect(series).toMatchObject({ spanSec: 60, binSec: 0.5 });
+  expect(series.peaks).toHaveLength(120);
+  // Two wait from t=0, one from t=10 to 20, empty afterwards.
+  expect([series.peaks[0], series.peaks[19], series.peaks[20], series.peaks[39], series.peaks[40], series.peaks[119]]).toEqual([2, 2, 1, 1, 0, 0]);
+  expect(queuePeaks(done.customers, 60, 15).peaks).toHaveLength(31);
 });

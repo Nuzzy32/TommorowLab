@@ -8,8 +8,8 @@ import type { Ack } from '../workers/protocol';
 import { buildConfig, draftReducer, FIELD_ORDER, fieldValue, horizonSec, initialDraft, outOfRange, parseNumber } from './draft';
 import { formatClock } from './format';
 import { ParameterPanel } from './ParameterPanel';
-import { InputLog, Results, Stage, STATUS_LABEL, StatusStrip } from './RunPanels';
-import { ConfirmDialog, Dialog, Icon, NumberField } from './ui';
+import { InputLog, Results, SceneBox, STATUS_LABEL, StatusStrip } from './RunPanels';
+import { ConfirmDialog, DialogShell, Icon } from './ui';
 import type { IconName } from './ui';
 
 const EMPTY_VIEW: ControllerView = { projection: null, state: null, speed: 20, transitioning: false, failure: null };
@@ -18,6 +18,25 @@ const emptyView = () => EMPTY_VIEW;
 const SPEEDS: Speed[] = [1, 5, 20];
 type Accepted = Extract<Ack, { accepted: true }>;
 type Notice = { tone: 'success' | 'danger'; text: string } | null;
+
+const HELP: { icon: IconName; title: string; body: string; tip: string }[] = [
+  { icon: 'playCircle', title: 'Jalankan percobaan', body: 'Preset Jam makan siang sudah siap. Tekan Jalankan untuk melihat pelanggan datang, menunggu, dilayani, lalu selesai.',
+    tip: 'Kecepatan tampilan 1×, 5×, 20× hanya mengubah pacing, bukan hasil. Spasi menjeda atau melanjutkan saat fokus tidak di kolom isian.' },
+  { icon: 'sliders', title: 'Ubah skenario', body: 'Atur jumlah loket, kedatangan otomatis, waktu pelayanan, durasi menerima pelanggan dan jadwal saat status Siap dijalankan.',
+    tip: 'Selama run, parameter dikunci. Ubah skenario akan mereset run setelah konfirmasi.' },
+  { icon: 'userPlus', title: 'Tambah pelanggan', body: 'Saat run berjalan atau dijeda, tambahkan 1–20 pelanggan sekaligus. Kedatangan dicatat pada waktu simulasi, bukan waktu klik.',
+    tip: 'Tambahan saat jeda menunggu diproses ketika run dilanjutkan.' },
+];
+const ASSUMPTIONS: { icon: IconName; title: string; body: string }[] = [
+  { icon: 'flask', title: 'Data sintetis', body: 'Hasil berasal dari model, bukan data kantin nyata. Distribusi belum dikalibrasi terhadap lapangan.' },
+  { icon: 'users', title: 'Kedatangan Poisson', body: 'Arus otomatis mengikuti proses Poisson dengan laju λ pelanggan/menit. Pelanggan manual adalah tambahan di luar Poisson.' },
+  { icon: 'timer', title: 'Pelayanan uniform', body: 'Setiap pelanggan dilayani selama nilai acak seragam antara minimum dan maksimum. Jika sama, waktu pelayanan konstan.' },
+  { icon: 'queue', title: 'Satu antrean FIFO', body: 'Satu antrean bersama melayani 1–6 loket identik. Kantin kosong saat mulai; tidak ada pelanggan yang batal atau pindah antrean.' },
+  { icon: 'drain', title: 'Batas kedatangan lalu penyelesaian', body: 'Setelah durasi menerima pelanggan berakhir, sisa pelanggan tetap diselesaikan sampai kosong.' },
+  { icon: 'walk', title: 'Ruang 3D hanya visual', body: 'Dapur, area makan, jarak berjalan dan posisi avatar tidak memengaruhi waktu tunggu atau pelayanan.' },
+  { icon: 'warning', title: 'Batas 2.000 pelanggan', body: 'Melewati batas per run menghentikan run sebagai tidak valid.' },
+  { icon: 'replay', title: 'Dapat diulang', body: 'Seed, konfigurasi, versi model dan catatan pelanggan manual yang sama menghasilkan run yang sama.' },
+];
 
 // The controller owns a worker, so it lives in an effect (StrictMode-safe) rather than in render.
 function useController() {
@@ -55,6 +74,7 @@ export function App() {
   const [confirm, setConfirm] = useState<null | 'reset' | 'edit'>(null);
   const [assumptionsOpen, setAssumptionsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(true);
+  const [helpStep, setHelpStep] = useState(0);
   const [addCount, setAddCount] = useState('1');
   const [addError, setAddError] = useState<string>();
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
@@ -193,125 +213,133 @@ export function App() {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  const addReason = fast ? 'Tidak tersedia selama penyelesaian cepat.'
-    : phase === 'draining' || (horizon !== null && simTime >= horizon) ? 'Kedatangan ditutup; sisa pelanggan sedang diselesaikan.' : null;
+  const addReason = !live ? 'Tersedia saat run berjalan atau dijeda.'
+    : fast ? 'Tidak tersedia selama penyelesaian cepat.'
+      : phase === 'draining' || (horizon !== null && simTime >= horizon) ? 'Kedatangan ditutup; sisa pelanggan sedang diselesaikan.' : null;
   const name = projection?.configSnapshot.name ?? 'Jam makan siang';
+  const seed = status === 'READY' ? draft.fields.seed : String(projection?.configSnapshot.rootSeed ?? '');
+  const step = HELP[helpStep];
 
   return (
     <>
+      <div className="backdrop" aria-hidden="true"><span /><span /><span /></div>
       <a className="skip-link" href="#kontrol">Ke kontrol simulasi</a>
       <a className="skip-link" href="#hasil">Ke hasil</a>
-      <header className="site-header">
-        <div className="brand">
-          <a className="wordmark" href="./">TomorrowLab</a>
-          <span className="tagline">Coba skenario. Pahami dampaknya.</span>
-        </div>
-        <nav className="header-actions" aria-label="Informasi">
-          <button type="button" className="button quiet compact" onClick={() => setAssumptionsOpen(true)}><Icon name="info" />Asumsi model</button>
-          <button type="button" className="button quiet compact" aria-expanded={helpOpen} aria-controls="help"
-            onClick={() => { setHelpOpen(true); setFocusTarget('help-title'); }}>Bantuan</button>
-        </nav>
-      </header>
+      <div className="app">
+        <header className="glass site-header">
+          <div className="brand">
+            <a className="wordmark" href="./">Tomorrow<span>Lab</span></a>
+            <span className="tagline">Coba skenario. Pahami dampaknya.</span>
+          </div>
+          <div className="header-spacer" />
+          <div className="scenario-name">
+            <h1 id="workspace-title" tabIndex={-1}>{name}</h1>
+            <p>Antrean kantin · data sintetis</p>
+          </div>
+          <nav className="header-actions" aria-label="Informasi">
+            <button type="button" className="button compact" onClick={() => setAssumptionsOpen(true)}><Icon name="info" /><span>Asumsi</span></button>
+            <button type="button" className="button compact" onClick={() => { setHelpStep(0); setHelpOpen(true); }}><Icon name="help" /><span>Bantuan</span></button>
+          </nav>
+        </header>
 
-      <main id="main">
-        {helpOpen && (
-          <section className="help" id="help" aria-labelledby="help-title">
-            <h2 id="help-title" tabIndex={-1}>Mulai dalam tiga langkah</h2>
-            <ol>
-              <li><strong>Jalankan</strong> preset untuk melihat pelanggan datang, menunggu, dilayani dan selesai.</li>
-              <li><strong>Ubah skenario</strong> sebelum run: jumlah loket, kedatangan, waktu pelayanan dan jadwal pelanggan.</li>
-              <li><strong>Tambah pelanggan</strong> saat run berjalan atau dijeda untuk mencoba lonjakan.</li>
-            </ol>
-            <p className="muted">Semua kontrol bisa dipakai dengan keyboard; kamera tidak diperlukan. Progres run tidak dipulihkan setelah halaman dimuat ulang.</p>
-            <div className="help-actions">
-              <button type="button" className="button secondary compact" onClick={() => { setHelpOpen(false); setFocusTarget('workspace-title'); }}>Lewati</button>
-              <button type="button" className="button secondary compact" onClick={() => { setHelpOpen(false); setFocusTarget('primary-action'); }}>Mulai mencoba</button>
-            </div>
-          </section>
-        )}
+        <main id="main" className="workspace">
+          <StatusStrip status={status} phase={phase} simTimeSec={simTime} horizonSec={horizon} fastMode={fast}
+            pauseReason={projection?.pauseReason ?? null} seed={seed} speed={view.speed}
+            drainSec={status === 'COMPLETED' ? projection?.result?.drainDurationSec ?? null : null}>
+            {view.failure && (
+              <p className="callout danger" role="alert"><Icon name="warning" /><span>Worker simulasi berhenti. Reset untuk memulai lagi dengan parameter yang sama.</span></p>
+            )}
+            {hiddenPause && (
+              <p className="callout warning"><Icon name="hidden" /><span>Dijeda karena tab tidak aktif. Lanjutkan saat siap.</span></p>
+            )}
+          </StatusStrip>
 
-        <div className="workspace-head">
-          <p className="eyebrow">Skenario · Antrean kantin · Data sintetis</p>
-          <h1 id="workspace-title" tabIndex={-1}>{name}</h1>
-        </div>
-
-        <StatusStrip status={status} phase={phase} simTimeSec={simTime} horizonSec={horizon}
-          fastMode={fast} pauseReason={projection?.pauseReason ?? null} />
-
-        {view.failure && (
-          <p className="callout danger" role="alert"><Icon name="warning" /><span>Worker simulasi berhenti. Reset untuk memulai lagi dengan parameter yang sama.</span></p>
-        )}
-        {hiddenPause && (
-          <p className="callout info"><Icon name="pause" /><span>Dijeda karena tab tidak aktif. Lanjutkan saat siap.</span></p>
-        )}
-
-        <div className="workspace">
-          <ParameterPanel draft={draft} dispatch={dispatch} editable={editable} onUnlock={() => setConfirm('edit')} />
-
-          <div className="run-column">
-            <section className="panel toolbar" aria-label="Kontrol run">
-              <div className="toolbar-row">
-                <button type="button" id="primary-action" className="button primary" disabled={!controller}
-                  aria-disabled={busy || view.transitioning || undefined}
-                  onClick={() => { if (!busyRef.current && !view.transitioning) primary.onClick(); }}>
-                  <Icon name={primary.icon} />{primary.label}
+          <section className="glass panel stage area-stage" aria-label="Panggung simulasi">
+            <div className="toolbar-row" role="group" aria-label="Kontrol run">
+              <button type="button" id="primary-action" className="button primary" disabled={!controller}
+                aria-disabled={busy || view.transitioning || undefined}
+                onClick={() => { if (!busyRef.current && !view.transitioning) primary.onClick(); }}>
+                <Icon name={primary.icon} weight="fill" />{primary.label}
+              </button>
+              {live && !fast && (
+                <button type="button" className="button" onClick={() => void act(() => controller!.fastFinish())}>
+                  <Icon name="fast" />Selesaikan cepat
                 </button>
-                {live && !fast && (
-                  <button type="button" className="button secondary" onClick={() => void act(() => controller!.fastFinish())}>
-                    <Icon name="fast" />Selesaikan cepat
-                  </button>
-                )}
-                <fieldset className="speed">
-                  <legend>Kecepatan tampilan</legend>
-                  <div className="segmented">
-                    {SPEEDS.map(speed => (
-                      <label key={speed}>
-                        <input type="radio" name="speed" value={speed} checked={view.speed === speed}
-                          onChange={() => controller?.setSpeed(speed)} />
-                        <span>{speed}×</span>
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-                {(live || status === 'COMPLETED') && (
-                  <button type="button" className="button danger" onClick={() => setConfirm('reset')}><Icon name="reset" />Reset run</button>
-                )}
-              </div>
-              <p className="field-hint">Kecepatan hanya mengatur tampilan, tidak mengubah hasil. Spasi menjeda atau melanjutkan saat fokus tidak berada di kolom isian.</p>
-
-              {live && (
-                <div className="add-customers" role="group" aria-labelledby="add-title">
-                  <h3 id="add-title">Tambah pelanggan</h3>
-                  <NumberField id="add-count" label="Jumlah" unit="orang" value={addCount} error={addError}
-                    disabled={addReason !== null} onChange={setAddCount} onCommit={() => {}}
-                    hint={addReason ?? `Pada waktu simulasi ${formatClock(simTime)}. Jumlah 1–20.`}
-                    after={<button type="button" className="button secondary" disabled={addReason !== null} onClick={addCustomers}>
-                      <Icon name="plus" />Tambah pelanggan</button>} />
+              )}
+              <fieldset className="speed">
+                <legend title="Tidak mengubah hasil simulasi">Kecepatan tampilan</legend>
+                <div className="segmented">
+                  {SPEEDS.map(speed => (
+                    <label key={speed}>
+                      <input type="radio" name="speed" value={speed} checked={view.speed === speed}
+                        onChange={() => controller?.setSpeed(speed)} />
+                      <span>{speed}×</span>
+                    </label>
+                  ))}
                 </div>
+              </fieldset>
+              <div className="toolbar-spacer" />
+              {(live || status === 'COMPLETED') && (
+                <button type="button" className="button danger" onClick={() => setConfirm('reset')}><Icon name="reset" />Reset run</button>
               )}
+            </div>
 
-              {notice && (
-                <p key={notice.text} className={`callout ${notice.tone}`} role={notice.tone === 'danger' ? 'alert' : undefined}>
-                  <Icon name={notice.tone === 'danger' ? 'warning' : 'check'} /><span>{notice.text}</span>
-                </p>
-              )}
-            </section>
+            <div className="add-strip" role="group" aria-labelledby="add-title">
+              <Icon name="userPlus" size={18} />
+              <label id="add-title" htmlFor="add-count">Tambah pelanggan</label>
+              <div className={`field-control${addError ? ' invalid' : ''}`}>
+                <input id="add-count" type="text" inputMode="numeric" autoComplete="off" value={addCount} disabled={addReason !== null}
+                  aria-invalid={addError ? true : undefined} aria-describedby={addError ? 'add-hint add-error' : 'add-hint'}
+                  onChange={event => setAddCount(event.target.value)}
+                  onKeyDown={event => { if (event.key === 'Enter') addCustomers(); }} />
+              </div>
+              <button type="button" className="button compact" disabled={addReason !== null} onClick={addCustomers}><Icon name="plus" size={15} />Tambahkan</button>
+              <p id="add-hint" className="field-hint">{addReason ?? `Pada waktu simulasi ${formatClock(simTime)}. Jumlah 1–20.`}</p>
+              {addError && <p id="add-error" className="field-error"><Icon name="warning" size={14} />{addError}</p>}
+            </div>
 
-            <Stage c={counters} projection={status === 'READY' ? null : projection} />
-          </div>
+            {notice && (
+              <p key={notice.text} className={`callout stage-notice ${notice.tone}`} role={notice.tone === 'danger' ? 'alert' : undefined}>
+                <Icon name={notice.tone === 'danger' ? 'warning' : 'check'} /><span>{notice.text}</span>
+              </p>
+            )}
 
-          <div className="side-column">
-            <Results status={status} projection={projection} onAssumptions={() => setAssumptionsOpen(true)} />
-            <InputLog status={status} projection={projection} />
-          </div>
-        </div>
-      </main>
+            <SceneBox c={counters} status={status} projection={status === 'READY' ? null : projection} speed={view.speed} />
+            <p className="field-hint">Kecepatan hanya mengatur tampilan, tidak mengubah hasil. Spasi menjeda atau melanjutkan saat fokus tidak berada di kolom isian.</p>
+          </section>
 
-      <footer className="site-footer">
-        <span>TomorrowLab · simulasi sintetis, belum dikalibrasi terhadap kantin nyata.</span>
-      </footer>
+          <ParameterPanel draft={draft} dispatch={dispatch} editable={editable} onUnlock={() => setConfirm('edit')}
+            status={status === 'READY' ? 'draft' : status === 'COMPLETED' ? 'done' : 'running'} />
+          <Results status={status} projection={projection} horizonSec={horizon} onAssumptions={() => setAssumptionsOpen(true)} onEdit={() => setConfirm('edit')} />
+          <InputLog status={status} projection={projection} draftSchedule={draft.schedule} />
+        </main>
+      </div>
 
       <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
+
+      <DialogShell open={helpOpen} className="dialog help" labelledBy="help-title" describedBy="help-body"
+        onClose={() => { setHelpOpen(false); setFocusTarget('workspace-title'); }}>
+        <div className="help-top">
+          <span>Bantuan ringkas · {helpStep + 1} dari {HELP.length}</span>
+          <button type="button" className="button quiet compact" onClick={() => { setHelpOpen(false); setFocusTarget('workspace-title'); }}>Lewati</button>
+        </div>
+        <div className="help-body">
+          <div className="help-icon" aria-hidden="true"><Icon name={step.icon} size={40} weight="duotone" /></div>
+          <div className="help-text">
+            <h2 id="help-title">{step.title}</h2>
+            <p id="help-body">{step.body}</p>
+            <p className="muted">{step.tip}</p>
+          </div>
+        </div>
+        <div className="help-nav">
+          <div className="help-dots" aria-hidden="true">{HELP.map((item, index) => <span key={item.title} aria-current={index === helpStep ? 'step' : undefined} />)}</div>
+          {helpStep > 0 && <button type="button" className="button" onClick={() => setHelpStep(helpStep - 1)}>Kembali</button>}
+          {helpStep < HELP.length - 1
+            ? <button type="button" className="button primary" onClick={() => setHelpStep(helpStep + 1)}>Berikutnya<Icon name="next" size={15} /></button>
+            : <button type="button" className="button primary" onClick={() => { setHelpOpen(false); setFocusTarget('primary-action'); }}>Mulai mencoba<Icon name="next" size={15} /></button>}
+        </div>
+        <p className="help-foot"><Icon name="cameraOff" size={15} />Kamera tidak diperlukan. Semua tugas dapat dilakukan dengan mouse dan keyboard. Progres run tidak dipulihkan setelah halaman dimuat ulang.</p>
+      </DialogShell>
 
       <ConfirmDialog open={confirm !== null}
         title={confirm === 'edit' ? 'Reset untuk mengubah skenario?' : 'Reset run ini?'}
@@ -320,19 +348,20 @@ export function App() {
         confirmLabel={confirm === 'edit' ? 'Reset dan edit' : 'Reset run'}
         onCancel={() => setConfirm(null)} onConfirm={() => reset(confirm === 'edit')} />
 
-      <Dialog open={assumptionsOpen} title="Asumsi model" onClose={() => setAssumptionsOpen(false)}
-        description={<p>Hasil adalah eksperimen sintetis. Kesesuaiannya dengan kantin nyata belum divalidasi dengan data lapangan.</p>}
-        actions={<button type="button" className="button secondary" autoFocus onClick={() => setAssumptionsOpen(false)}>Tutup</button>}>
+      <DialogShell open={assumptionsOpen} className="dialog drawer" labelledBy="assumptions-title" describedBy="assumptions-desc"
+        onClose={() => setAssumptionsOpen(false)}>
+        <div className="drawer-head">
+          <h2 id="assumptions-title">Asumsi model</h2>
+          <button type="button" className="icon-button small" aria-label="Tutup" autoFocus onClick={() => setAssumptionsOpen(false)}><Icon name="close" size={16} /></button>
+        </div>
+        <p id="assumptions-desc" className="dialog-description">Hasil adalah eksperimen sintetis. Kesesuaiannya dengan kantin nyata belum divalidasi dengan data lapangan.</p>
         <ul className="assumptions">
-          <li>Satu antrean bersama, dilayani menurut urutan datang (FIFO), oleh 1–6 loket identik.</li>
-          <li>Kedatangan otomatis mengikuti proses Poisson; pelanggan manual adalah tambahan di luar Poisson.</li>
-          <li>Waktu pelayanan acak seragam antara minimum dan maksimum.</li>
-          <li>Kantin kosong saat mulai. Pelanggan diterima selama durasi menerima pelanggan, lalu sisa pelanggan diselesaikan.</li>
-          <li>Jarak berjalan dan posisi tampilan tidak memengaruhi waktu. Tidak ada pelanggan yang batal atau pindah antrean.</li>
-          <li>Batas 2.000 pelanggan per run; melewatinya menghentikan run sebagai tidak valid.</li>
-          <li>Seed, konfigurasi, versi model dan catatan pelanggan manual yang sama menghasilkan run yang sama.</li>
+          {ASSUMPTIONS.map(item => (
+            <li key={item.title} className="card"><Icon name={item.icon} size={20} /><div><strong>{item.title}</strong><span>{item.body}</span></div></li>
+          ))}
         </ul>
-      </Dialog>
+        <p className="versions">canteen-fifo-v1 · des-ts-v1 · pcg32-xsh-rr-v1</p>
+      </DialogShell>
     </>
   );
 }

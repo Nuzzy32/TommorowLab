@@ -34,6 +34,9 @@ export type RejectCode =
   | 'PROTOCOL_MISMATCH' | 'MALFORMED' | 'NOT_BOUND' | 'STALE_EPOCH' | 'STALE_JOB' | 'DUPLICATE'
   | 'INVALID_STATE' | 'INVALID_INPUT' | 'BUSY' | 'LIMIT_REACHED' | 'INTERNAL';
 
+export const QUEUE_BINS = 120;
+export type QueuePeaks = { binSec: number; spanSec: number; peaks: number[] };
+
 // View projection: everything the UI and scene need, without the full customer records.
 export type Projection = Omit<Snapshot, 'customers' | 'waitingCustomerIds'> & {
   runId: string;
@@ -41,6 +44,7 @@ export type Projection = Omit<Snapshot, 'customers' | 'waitingCustomerIds'> & {
   pauseReason: PauseReason | null;
   waitingSample: string[];
   summarizedWaiting: number;
+  queuePeaks: QueuePeaks;
 };
 
 export type Ack =
@@ -119,8 +123,41 @@ export function parseCommand(input: unknown): CommandEnvelope {
 }
 
 export function project(snapshot: Snapshot, runId: string, fastMode: boolean, pauseReason: PauseReason | null): Projection {
-  const { customers: _customers, waitingCustomerIds, ...rest } = snapshot;
+  const { customers, waitingCustomerIds, ...rest } = snapshot;
   const busy = snapshot.servers.filter(server => server.busyCustomerId !== null).length;
   const waitingSample = waitingCustomerIds.slice(0, Math.max(0, AVATAR_LIMIT - busy));
-  return { ...rest, runId, fastMode, pauseReason, waitingSample, summarizedWaiting: waitingCustomerIds.length - waitingSample.length };
+  return {
+    ...rest, runId, fastMode, pauseReason, waitingSample, summarizedWaiting: waitingCustomerIds.length - waitingSample.length,
+    queuePeaks: queuePeaks(customers, snapshot.configSnapshot.horizonSec, snapshot.simTimeSec),
+  };
+}
+
+/**
+ * Exact peak queue length per bin, rebuilt from customer records. Arrivals and service starts at the
+ * same timestamp are netted first, so levels match the engine's post-dispatch queue (and maxQueue).
+ */
+export function queuePeaks(customers: Snapshot['customers'], horizonSec: number, simTimeSec: number): QueuePeaks {
+  const spanSec = Math.max(horizonSec, simTimeSec);
+  const binSec = spanSec / QUEUE_BINS;
+  const delta = new Map<number, number>();
+  for (const customer of customers) {
+    delta.set(customer.arrivalAt, (delta.get(customer.arrivalAt) ?? 0) + 1);
+    if (customer.serviceStartAt !== null) delta.set(customer.serviceStartAt, (delta.get(customer.serviceStartAt) ?? 0) - 1);
+  }
+  const times = [...delta.keys()].sort((a, b) => a - b);
+  const filled = Math.min(QUEUE_BINS, Math.floor(simTimeSec / binSec) + 1);
+  const peaks: number[] = [];
+  let level = 0, next = 0;
+  for (let bin = 0; bin < filled; bin++) {
+    const end = bin === QUEUE_BINS - 1 ? Infinity : (bin + 1) * binSec;
+    // A change exactly at the bin start holds for the whole bin; apply it before reading the carried level.
+    while (next < times.length && times[next] <= bin * binSec) level += delta.get(times[next++])!;
+    let peak = level;
+    while (next < times.length && times[next] < end) {
+      level += delta.get(times[next++])!;
+      peak = Math.max(peak, level);
+    }
+    peaks.push(peak);
+  }
+  return { binSec, spanSec, peaks };
 }

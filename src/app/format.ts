@@ -46,3 +46,9 @@ export function metricReason(metric: Metric) {
     default: return null;
   }
 }
+
+/** A metric split into number and unit, so the unit can be set smaller next to the value. */
+export function metricParts(metric: Metric): { value: string; unit?: string } {
+  if (metric.value === null) return { value: 'N/A' };
+  return { value: formatSeconds(metric.value).replace(/ detik$/, ''), unit: 'detik' };
+}
