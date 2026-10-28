@@ -10,6 +10,7 @@ Scope: bagian WP-10 yang dapat diotomatisasi, yaitu uji lintas mesin browser, au
 | Tab "Bandingkan" tidak dapat dicapai keyboard (tab tak aktif `tabIndex=-1` tanpa navigasi panah) | semua | Pola ARIA tabs: ←/→/Home/End berpindah tab |
 | `aria-label` pada `<span>` timer tidak didukung dengan baik oleh pembaca layar | semua | Timer visual `aria-hidden`, ditambah teks sr-only "N menit M detik" |
 | CI hanya menjalankan Chromium | — | Workflow memasang dan menjalankan Chromium, Firefox, dan WebKit |
+| Dialog bertumpuk dengan `backdrop-filter` blur selebar viewport membuat WebKit Linux (render software) tidak pernah stabil | Linux | Dialog dan backdrop modal tanpa blur (putih 96%, overlay 30%); panel kaca tetap. CI menjalankan Playwright dengan 1 worker; direproduksi dan diverifikasi di container `mcr.microsoft.com/playwright:v1.64.1-noble` (4 CPU) |
 | Di runner Linux, WebKit me-render 3D dengan software GL hanya beberapa fps sehingga kontrol nyaris tidak bisa diklik; Firefox headless Linux tidak punya WebGL2 | Linux | Scene memantau jeda antarframe: ≥12 dari 15 frame terakhir >120 ms (di bawah ±8 fps; terukur 2–5 fps di container WebKit Linux) memicu fallback otomatis ke tampilan ringkas dengan pesan "Ruang 3D terlalu berat untuk perangkat ini" dan tombol "Coba 3D lagi" (permintaan ulang mempertahankan 3D). Tes 3D dilewati bila WebGL2 tidak ada atau <10 fps; tes baru memperlambat `requestAnimationFrame` untuk membuktikan fallback |
 
 ## Pemeriksaan otomatis

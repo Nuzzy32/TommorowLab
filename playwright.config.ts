@@ -4,6 +4,9 @@ export default defineConfig({
   testDir: './tests/e2e',
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
+  // GitHub runners have no GPU: WebKit and Firefox render the glass UI and WebGL in software, so parallel
+  // browsers starve each other. One worker keeps CI deterministic; locally Playwright picks its default.
+  workers: process.env.CI ? 1 : undefined,
   reporter: 'list',
   use: {
     baseURL: 'http://127.0.0.1:4173',

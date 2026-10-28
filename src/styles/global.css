@@ -365,11 +365,12 @@ a:hover { color: var(--tl-color-primary-hover); }
 /* Dialogs: CMP-13, native <dialog>. */
 .dialog {
   width: min(100% - 2rem, 28rem); max-height: calc(100dvh - 2rem); padding: var(--tl-space-6); border: 1px solid #fff;
-  border-radius: 1.625rem; background: rgb(255 255 255 / 86%); -webkit-backdrop-filter: blur(34px) saturate(180%); backdrop-filter: blur(34px) saturate(180%);
+  border-radius: 1.625rem; background: rgb(255 255 255 / 96%);
   color: var(--tl-color-text); box-shadow: var(--tl-shadow-overlay);
 }
 .dialog[open] { display: flex; flex-direction: column; gap: 0.875rem; animation: dialog-in var(--tl-motion-overlay) var(--tl-ease-standard); }
-.dialog::backdrop { background: var(--tl-color-overlay); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+/* No backdrop blur on modals: stacked full-viewport blurs are very costly on software-rendered or weak devices. */
+.dialog::backdrop { background: rgb(23 34 30 / 30%); }
 .dialog h2 { font: 700 1.25rem/1.25 var(--tl-font-ui); }
 .dialog-description { font: 500 0.875rem/1.6 var(--tl-font-ui); color: var(--tl-color-text-body); }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--tl-space-2); }
