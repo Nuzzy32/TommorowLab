@@ -336,3 +336,124 @@ test('a completed run can become baseline A from the results panel', async ({ pa
   // λ=0 with a fixed schedule: every replication sees the same three customers.
   await expect(page.getByRole('region', { name: 'Hasil perbandingan' })).toContainText('Skenario identik');
 });
+
+// A valid stored record written straight into localStorage, as another tab or an older session would.
+const record = (recordId: string, name: string, c = 2) => JSON.stringify({
+  schemaVersion: 1, recordId, revision: 1, savedAt: `2026-10-2${recordId.length % 9}T08:00:00.000Z`,
+  config: {
+    id: recordId, name, schemaVersion: 1, modelVersion: 'canteen-fifo-v1', c, lambdaPerMinute: 4,
+    serviceMinSec: 20, serviceMaxSec: 40, horizonSec: 900, rootSeed: 2026, manualSchedule: [],
+  },
+  versions: { modelVersion: 'canteen-fifo-v1', engineVersion: 'des-ts-v1', rngVersion: 'pcg32-xsh-rr-v1', seedDerivationVersion: 'seed-pcg32-v1' },
+});
+const drawer = (page: Page) => page.getByRole('dialog', { name: 'Tersimpan' });
+
+test('UF-12/13 save survives a refresh, loads back into READY and deletes only that slot', async ({ page }) => {
+  await open(page);
+  await setField(page, 'Kedatangan otomatis', '7,5');
+  await setField(page, 'Seed percobaan', '99');
+  await page.getByRole('button', { name: 'Tersimpan' }).click();
+  await expect(drawer(page)).toContainText('Belum ada konfigurasi tersimpan');
+  await drawer(page).getByRole('button', { name: 'Simpan konfigurasi' }).click();
+  const save = page.getByRole('dialog', { name: 'Simpan konfigurasi' });
+  await expect(save.getByRole('textbox', { name: 'Nama' })).toBeFocused();
+  await expect(save.getByRole('textbox', { name: 'Nama' })).toHaveValue('Kantin · 2 loket');
+  await save.getByRole('textbox', { name: 'Nama' }).fill('<b>Siang</b> ramai');
+  await save.getByRole('button', { name: 'Simpan' }).click();
+  await expect(drawer(page)).toContainText('Konfigurasi “<b>Siang</b> ramai” tersimpan di browser ini.');
+  await expect(drawer(page).locator('b')).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole('dialog', { name: 'Jalankan percobaan' })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Seed percobaan', exact: true })).toHaveValue('2026');
+  await primary(page).click();
+  await expect(status(page)).toContainText('Berjalan');
+  await page.getByRole('button', { name: 'Tersimpan' }).click();
+  await drawer(page).getByRole('button', { name: 'Muat <b>Siang</b> ramai' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Muat konfigurasi “<b>Siang</b> ramai”?' });
+  await expect(confirm.getByRole('button', { name: 'Batal' })).toBeFocused();
+  await confirm.getByRole('button', { name: 'Muat konfigurasi' }).click();
+  await expect(status(page)).toContainText('Siap dijalankan');
+  await expect(timer(page)).toHaveText('00:00');
+  await expect(page.getByRole('textbox', { name: 'Kedatangan otomatis', exact: true })).toHaveValue('7,5');
+  await expect(page.getByRole('textbox', { name: 'Seed percobaan', exact: true })).toHaveValue('99');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('<b>Siang</b> ramai');
+  await expect(page.getByRole('textbox', { name: 'Loket aktif', exact: true })).toBeFocused();
+
+  await page.getByRole('button', { name: 'Tersimpan' }).click();
+  await drawer(page).getByRole('button', { name: 'Hapus <b>Siang</b> ramai' }).click();
+  await page.getByRole('dialog', { name: 'Hapus konfigurasi “<b>Siang</b> ramai”?' }).getByRole('button', { name: 'Hapus konfigurasi' }).click();
+  await expect(drawer(page)).toContainText('Belum ada konfigurasi tersimpan');
+  expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('tomorrowlab:scenario:')))).toEqual([]);
+});
+
+test('ten slots are full: saving asks which slot to replace and confirms the overwrite', async ({ page }) => {
+  await page.addInitScript(([records]) => {
+    if (localStorage.getItem('seeded')) return;
+    localStorage.setItem('seeded', '1');
+    records.forEach(([id, raw]) => localStorage.setItem(`tomorrowlab:scenario:${id}`, raw));
+  }, [Array.from({ length: 10 }, (_, index) => [`slot${index}`, record(`slot${index}`, `Slot ${index}`)])] as const);
+  await open(page);
+  await page.getByRole('button', { name: 'Tersimpan' }).click();
+  await expect(drawer(page).getByRole('listitem')).toHaveCount(10);
+  await drawer(page).getByRole('button', { name: 'Simpan konfigurasi' }).click();
+  const save = page.getByRole('dialog', { name: 'Simpan konfigurasi' });
+  await save.getByRole('textbox', { name: 'Nama' }).fill('Baru');
+  await save.getByRole('button', { name: 'Simpan' }).click();
+  await expect(save.getByText('Penyimpanan penuh: pilih konfigurasi untuk diganti atau hapus satu slot.')).toBeVisible();
+  await save.getByRole('radio', { name: 'Slot 4' }).check();
+  await save.getByRole('button', { name: 'Simpan' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Ganti konfigurasi tersimpan?' });
+  await expect(confirm).toContainText('“Slot 4” diganti dengan “Baru”');
+  await confirm.getByRole('button', { name: 'Ganti konfigurasi' }).click();
+  await expect(drawer(page)).toContainText('Konfigurasi “Baru” tersimpan');
+  await expect(drawer(page).getByRole('listitem')).toHaveCount(10);
+  await expect(drawer(page)).not.toContainText('Slot 4');
+});
+
+test('FR-23 corrupt records stay listed but unloadable, and a blocked storage keeps the app running', async ({ page, browser }) => {
+  await page.addInitScript(() => localStorage.setItem('tomorrowlab:scenario:broken', '{not json'));
+  await open(page);
+  await page.getByRole('button', { name: 'Tersimpan' }).click();
+  await expect(drawer(page)).toContainText('Konfigurasi tidak dapat dimuat');
+  await expect(drawer(page)).toContainText('Data rusak (bukan JSON yang sah). Record tidak diubah.');
+  await expect(drawer(page).getByRole('button', { name: /^Muat/ })).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('tomorrowlab:scenario:broken'))).toBe('{not json');
+
+  const blocked = await browser.newPage();
+  const blockedErrors: string[] = [];
+  blocked.on('pageerror', error => blockedErrors.push(error.message));
+  await blocked.addInitScript(() => {
+    Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('blocked', 'SecurityError'); } });
+  });
+  await open(blocked);
+  await blocked.getByRole('button', { name: 'Tersimpan' }).click();
+  await expect(drawer(blocked)).toContainText('Simulasi tetap berjalan tanpa simpan lokal');
+  await expect(drawer(blocked).getByRole('button', { name: 'Simpan konfigurasi' })).toBeDisabled();
+  await blocked.keyboard.press('Escape');
+  await primary(blocked).click();
+  await expect(status(blocked)).toContainText('Berjalan');
+  expect(blockedErrors).toEqual([]);
+  await blocked.close();
+});
+
+test('a delete confirmed after another tab changed the slot is refused as a conflict', async ({ page, context }) => {
+  await page.addInitScript(([raw]) => {
+    if (!localStorage.getItem('seeded')) { localStorage.setItem('seeded', '1'); localStorage.setItem('tomorrowlab:scenario:shared', raw); }
+  }, [record('shared', 'Bersama')] as const);
+  await open(page);
+  await page.getByRole('button', { name: 'Tersimpan' }).click();
+  await drawer(page).getByRole('button', { name: 'Hapus Bersama' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Hapus konfigurasi “Bersama”?' });
+  await expect(confirm).toBeVisible();
+
+  const other = await context.newPage();
+  await other.goto('/');
+  await other.evaluate(([raw]) => localStorage.setItem('tomorrowlab:scenario:shared', raw), [record('shared', 'Bersama diubah', 4)] as const);
+  await other.close();
+
+  await confirm.getByRole('button', { name: 'Hapus konfigurasi' }).click();
+  await expect(drawer(page)).toContainText('Data tersimpan berubah di tab lain.');
+  await expect(drawer(page)).toContainText('Bersama diubah');
+  expect(await page.evaluate(() => localStorage.getItem('tomorrowlab:scenario:shared'))).toContain('Bersama diubah');
+});

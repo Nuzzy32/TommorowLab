@@ -80,7 +80,8 @@ export type DraftAction =
   | { type: 'errors'; errors: DraftErrors }
   | { type: 'editEntry'; name: EntryField; value: string }
   | { type: 'addEntry' }
-  | { type: 'removeEntry'; id: string };
+  | { type: 'removeEntry'; id: string }
+  | { type: 'load'; config: ScenarioConfig };
 
 export function draftReducer(draft: Draft, action: DraftAction): Draft {
   switch (action.type) {
@@ -131,6 +132,8 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
         return { ...draft, errors: { ...errors, entry: error instanceof ValidationError ? 'Jadwal maksimal 2.000 pelanggan.' : String(error) } };
       }
     }
+    case 'load':
+      return initialDraft(action.config);
     case 'removeEntry': {
       const { schedule: _old, ...errors } = draft.errors;
       return { ...draft, schedule: draft.schedule.filter(entry => entry.id !== action.id), errors };
@@ -139,7 +142,7 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
 }
 
 /** Full validation for Jalankan: never runs part of a draft that has an invalid field or entry. */
-export function buildConfig(draft: Draft): { config: ScenarioConfig } | { errors: DraftErrors } {
+export function buildConfig(draft: Draft, identity: Pick<ScenarioConfig, 'id' | 'name'> = DEFAULT_CONFIG): { config: ScenarioConfig } | { errors: DraftErrors } {
   const errors = fieldErrors(draft.fields, FIELD_ORDER);
   if (outOfRange(draft).length > 0) errors.schedule = 'Ada jadwal di luar durasi menerima pelanggan. Hapus entry tersebut atau perpanjang durasi.';
   if (Object.keys(errors).length > 0) return { errors };
@@ -147,7 +150,7 @@ export function buildConfig(draft: Draft): { config: ScenarioConfig } | { errors
   try {
     return {
       config: validateConfig({
-        ...DEFAULT_CONFIG, c: value('c'), lambdaPerMinute: value('lambda'), serviceMinSec: value('serviceMin'),
+        ...DEFAULT_CONFIG, id: identity.id, name: identity.name, c: value('c'), lambdaPerMinute: value('lambda'), serviceMinSec: value('serviceMin'),
         serviceMaxSec: value('serviceMax'), horizonSec: value('horizonMin') * 60, rootSeed: value('seed'), manualSchedule: draft.schedule,
       }),
     };

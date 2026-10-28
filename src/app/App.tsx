@@ -1,8 +1,11 @@
-import { useEffect, useReducer, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import { createSimulationController } from '../controller/client';
 import type { ControllerView, SimulationController, Speed } from '../controller/client';
+import { DEFAULT_CONFIG, promoteManualLog } from '../domain/config';
 import type { ScenarioConfig } from '../domain/config';
+import { browserScenarioStore, helpSeen, KEY_PREFIX, markHelpSeen } from '../storage/scenarios';
+import type { Expected, Listing, Slot } from '../storage/scenarios';
 import type { RunStatus } from '../simulation/engine';
 import type { Ack } from '../workers/protocol';
 import { buildConfig, draftReducer, FIELD_ORDER, fieldValue, horizonSec, initialDraft, outOfRange, parseNumber } from './draft';
@@ -11,6 +14,8 @@ import { ParameterPanel } from './ParameterPanel';
 import { ComparePanel } from './ComparePanel';
 import type { Baseline } from './ComparePanel';
 import { InputLog, Results, SceneBox, STATUS_LABEL, StatusStrip } from './RunPanels';
+import { SaveDialog, SavedDrawer } from './SavedPanels';
+import type { SaveRequest } from './SavedPanels';
 import { ConfirmDialog, DialogShell, Icon } from './ui';
 import type { IconName } from './ui';
 
@@ -81,7 +86,18 @@ export function App() {
   const [baseline, setBaseline] = useState<{ value: Baseline; version: number } | null>(null);
   const [compareNotice, setCompareNotice] = useState<string | null>(null);
   const [assumptionsOpen, setAssumptionsOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(true);
+  const [helpOpen, setHelpOpen] = useState(() => !helpSeen());
+  const [store] = useState(browserScenarioStore);
+  const [listing, setListing] = useState<Listing>({ readable: true, writable: false, reason: null, slots: [] });
+  const [savedOpen, setSavedOpen] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [savedStale, setSavedStale] = useState(false);
+  const [savedNotice, setSavedNotice] = useState<Notice>(null);
+  const [pendingLoad, setPendingLoad] = useState<Extract<Slot, { status: 'ok' }> | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Slot | null>(null);
+  // Identity of the open scenario and, when it came from (or was written to) a slot, what that slot held.
+  const [identity, setIdentity] = useState<Pick<ScenarioConfig, 'id' | 'name'>>({ id: DEFAULT_CONFIG.id, name: DEFAULT_CONFIG.name });
+  const [loaded, setLoaded] = useState<Expected | null>(null);
   const [helpStep, setHelpStep] = useState(0);
   const [addCount, setAddCount] = useState('1');
   const [addError, setAddError] = useState<string>();
@@ -118,7 +134,7 @@ export function App() {
   }
 
   function run() {
-    const built = buildConfig(draft);
+    const built = buildConfig(draft, identity);
     if ('errors' in built) {
       flushSync(() => dispatch({ type: 'errors', errors: built.errors }));
       const first = FIELD_ORDER.find(name => built.errors[name]);
@@ -139,7 +155,7 @@ export function App() {
   function reset(edit: boolean) {
     setConfirm(null);
     setNotice(null);
-    const fallback = lastConfig.current ?? (() => { const built = buildConfig(draft); return 'config' in built ? built.config : null; })();
+    const fallback = lastConfig.current ?? (() => { const built = buildConfig(draft, identity); return 'config' in built ? built.config : null; })();
     void act(() => (view.failure && fallback ? controller!.create(fallback) : controller!.reset()), () => {
       if (edit) setFocusTarget('field-c');
     });
@@ -165,7 +181,7 @@ export function App() {
     setCompareConfirm(null);
     let value: Baseline;
     if (status === 'READY' || !projection) {
-      const built = buildConfig(draft);
+      const built = buildConfig(draft, identity);
       if ('errors' in built) {
         setTab('sim');
         flushSync(() => dispatch({ type: 'errors', errors: built.errors }));
@@ -191,6 +207,80 @@ export function App() {
   function pauseAndOpen() {
     setCompareConfirm(null);
     void act(() => controller!.pause(), () => setTab('compare'));
+  }
+
+  const refreshSaved = useCallback(() => setListing(store.list()), [store]);
+  useEffect(() => {
+    refreshSaved();
+    // Another tab changed this app's slots: refresh and say so; locks still guard every write.
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key.startsWith(KEY_PREFIX)) { refreshSaved(); setSavedStale(true); }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [refreshSaved]);
+  useEffect(() => { if (!helpOpen) markHelpSeen(); }, [helpOpen]);
+
+  async function saveConfig(request: SaveRequest): Promise<string | null> {
+    let config: ScenarioConfig;
+    if (status === 'READY' || !projection) {
+      const built = buildConfig(draft, identity);
+      if ('errors' in built) return 'Perbaiki isian skenario yang ditandai sebelum menyimpan.';
+      config = built.config;
+    } else {
+      config = request.includeLog && projection.inputLog.length ? promoteManualLog(projection.configSnapshot, projection.inputLog) : projection.configSnapshot;
+    }
+    const outcome = await store.save(config, request.name, request.target);
+    refreshSaved();
+    if (!outcome.ok) return outcome.message;
+    const record = outcome.record!;
+    setSaveOpen(false);
+    setIdentity({ id: record.recordId, name: record.config.name });
+    setLoaded({ recordId: record.recordId, raw: JSON.stringify(record) });
+    const text = `Konfigurasi “${record.config.name}” tersimpan di browser ini.`;
+    setSavedNotice({ tone: 'success', text });
+    if (!savedOpen) setNotice({ tone: 'success', text });
+    setAnnouncement(text);
+    return null;
+  }
+
+  function requestLoad(slot: Extract<Slot, { status: 'ok' }>) {
+    if (batchActive) { setSavedNotice({ tone: 'danger', text: 'Batalkan perbandingan A/B yang sedang berjalan sebelum memuat konfigurasi.' }); return; }
+    setPendingLoad(slot);
+  }
+
+  // Load opens READY with the saved values (FR-22); a previous run is replaced, never resumed.
+  async function loadSlot(slot: Extract<Slot, { status: 'ok' }>) {
+    const { config } = slot.record;
+    setPendingLoad(null);
+    setSavedOpen(false);
+    setTab('sim');
+    if (status !== 'READY' && view.state !== null) {
+      await act(() => controller!.create(config));
+      lastConfig.current = config;
+    }
+    dispatch({ type: 'load', config });
+    setIdentity({ id: config.id, name: config.name });
+    setLoaded({ recordId: slot.recordId, raw: slot.raw });
+    const text = `Konfigurasi “${config.name}” dimuat dengan seed ${config.rootSeed}. Siap dijalankan.`;
+    setNotice({ tone: 'success', text });
+    setAnnouncement(text);
+    setFocusTarget('field-c');
+  }
+
+  async function deleteSlot(slot: Slot) {
+    setPendingDelete(null);
+    const index = listing.slots.findIndex(item => item.recordId === slot.recordId);
+    const neighbour = listing.slots[index + 1] ?? listing.slots[index - 1];
+    const outcome = await store.remove({ recordId: slot.recordId, raw: slot.raw });
+    refreshSaved();
+    const label = slot.status === 'ok' ? slot.record.config.name : 'yang tidak dapat dimuat';
+    if (!outcome.ok) { setSavedNotice({ tone: 'danger', text: outcome.message }); return; }
+    if (loaded?.recordId === slot.recordId) setLoaded(null);
+    const text = `Konfigurasi “${label}” dihapus.`;
+    setSavedNotice({ tone: 'success', text });
+    setAnnouncement(text);
+    setFocusTarget(neighbour ? (neighbour.status === 'ok' ? `load-${neighbour.recordId}` : `delete-${neighbour.recordId}`) : 'saved-empty-title');
   }
 
   let primary: { label: string; icon: IconName; onClick: () => void };
@@ -261,7 +351,7 @@ export function App() {
     : !live ? 'Tersedia saat run berjalan atau dijeda.'
     : fast ? 'Tidak tersedia selama penyelesaian cepat.'
       : phase === 'draining' || (horizon !== null && simTime >= horizon) ? 'Kedatangan ditutup; sisa pelanggan sedang diselesaikan.' : null;
-  const name = projection?.configSnapshot.name ?? 'Jam makan siang';
+  const name = status === 'READY' || !projection ? identity.name : projection.configSnapshot.name;
   const seed = status === 'READY' ? draft.fields.seed : String(projection?.configSnapshot.rootSeed ?? '');
   const step = HELP[helpStep];
 
@@ -285,9 +375,10 @@ export function App() {
           <div className="header-spacer" />
           <div className="scenario-name">
             <h1 id="workspace-title" tabIndex={-1}>{name}</h1>
-            <p>Antrean kantin · data sintetis</p>
+            <p>{loaded ? 'Tersimpan di browser ini' : 'Belum disimpan'} · data sintetis</p>
           </div>
           <nav className="header-actions" aria-label="Informasi">
+            <button type="button" className="button compact" onClick={() => { refreshSaved(); setSavedStale(false); setSavedNotice(null); setSavedOpen(true); }}><Icon name="folder" /><span>Tersimpan</span></button>
             <button type="button" className="button compact" onClick={() => setAssumptionsOpen(true)}><Icon name="info" /><span>Asumsi</span></button>
             <button type="button" className="button compact" onClick={() => { setHelpStep(0); setHelpOpen(true); }}><Icon name="help" /><span>Bantuan</span></button>
           </nav>
@@ -365,7 +456,7 @@ export function App() {
 
           <ParameterPanel draft={draft} dispatch={dispatch} editable={editable} onUnlock={() => setConfirm('edit')}
             status={status === 'READY' ? 'draft' : status === 'COMPLETED' ? 'done' : 'running'} />
-          <Results status={status} projection={projection} horizonSec={horizon} onAssumptions={() => setAssumptionsOpen(true)} onEdit={() => setConfirm('edit')} onBaseline={requestBaseline} />
+          <Results status={status} projection={projection} horizonSec={horizon} onAssumptions={() => setAssumptionsOpen(true)} onEdit={() => setConfirm('edit')} onBaseline={requestBaseline} onSave={() => setSaveOpen(true)} />
           <InputLog status={status} projection={projection} draftSchedule={draft.schedule} />
         </main>
 
@@ -409,6 +500,20 @@ export function App() {
           Hapus progres, hasil run, dan tambahan pelanggan selama run ini? Parameter, seed, dan jadwal awal tetap disimpan.</p>}
         confirmLabel={confirm === 'edit' ? 'Reset dan edit' : 'Reset run'}
         onCancel={() => setConfirm(null)} onConfirm={() => reset(confirm === 'edit')} />
+
+      <SavedDrawer open={savedOpen} listing={listing} stale={savedStale} notice={savedNotice} onClose={() => setSavedOpen(false)}
+        onSave={() => setSaveOpen(true)} onLoad={requestLoad} onDelete={slot => setPendingDelete(slot)} />
+      {saveOpen && (
+        <SaveDialog open source={status === 'READY' || !projection ? 'draft skenario' : `snapshot run (${STATUS_LABEL[status].toLowerCase()})`}
+          defaultName={loaded ? identity.name : `Kantin · ${counters} loket`} logEntries={status === 'READY' ? 0 : projection?.inputLog.length ?? 0}
+          listing={listing} loaded={loaded} onClose={() => setSaveOpen(false)} onSave={saveConfig} />
+      )}
+      <ConfirmDialog open={pendingLoad !== null} title={`Muat konfigurasi “${pendingLoad?.record.config.name ?? ''}”?`}
+        description={<p>{status === 'READY' ? 'Isian skenario saat ini diganti dengan konfigurasi tersimpan.' : 'Run, hasil dan tambahan pelanggan saat ini ditinggalkan; workspace kembali Siap dijalankan dari waktu 00:00.'} Ini memuat konfigurasi, bukan melanjutkan run lama.</p>}
+        confirmLabel="Muat konfigurasi" onCancel={() => setPendingLoad(null)} onConfirm={() => void loadSlot(pendingLoad!)} />
+      <ConfirmDialog open={pendingDelete !== null} title={`Hapus konfigurasi “${pendingDelete?.status === 'ok' ? pendingDelete.record.config.name : 'tidak dapat dimuat'}”?`}
+        description={<p>Hanya slot ini yang dihapus dari browser ini. Konfigurasi lain dan data aplikasi lain tidak tersentuh.</p>}
+        confirmLabel="Hapus konfigurasi" onCancel={() => setPendingDelete(null)} onConfirm={() => void deleteSlot(pendingDelete!)} />
 
       <ConfirmDialog open={compareConfirm === 'open'} title="Pause dan buka perbandingan?"
         description={<p>Run dan perbandingan tidak dihitung bersamaan. Run ini dijeda pada waktu simulasi {formatClock(simTime)} dan dapat dilanjutkan nanti.</p>}

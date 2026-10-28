@@ -2,7 +2,7 @@
 
 Coba skenario. Pahami dampaknya.
 
-SPA statis untuk simulator antrean kantin kampus. Kontrak data, validator, PCG32, core simulasi FIFO dan metrik sudah tersedia sebagai TypeScript murni dengan pengujian numerik. Adapter Web Worker, controller main thread dan workspace dengan kontrol manual (UF-01–08) sudah berjalan: atur skenario dan jadwal, jalankan, jeda, tambah pelanggan, selesaikan cepat, ulangi dan reset, dengan ruang 3D kantin (three.js, dimuat lazy) atau tampilan ringkas, grafik panjang antrean dan hasil final. Tampilan mengikuti arah visual kaca DESIGN_SYSTEM v1.1. Tab **Bandingkan** menjalankan 20 pasangan replikasi A/B dengan permintaan yang sama (CRN) dan interval 95% selisih rata-rata tunggu. Simpan/muat konfigurasi dan AirShift belum diimplementasikan.
+SPA statis untuk simulator antrean kantin kampus. Kontrak data, validator, PCG32, core simulasi FIFO dan metrik sudah tersedia sebagai TypeScript murni dengan pengujian numerik. Adapter Web Worker, controller main thread dan workspace dengan kontrol manual (UF-01–08) sudah berjalan: atur skenario dan jadwal, jalankan, jeda, tambah pelanggan, selesaikan cepat, ulangi dan reset, dengan ruang 3D kantin (three.js, dimuat lazy) atau tampilan ringkas, grafik panjang antrean dan hasil final. Tampilan mengikuti arah visual kaca DESIGN_SYSTEM v1.1. Tab **Bandingkan** menjalankan 20 pasangan replikasi A/B dengan permintaan yang sama (CRN) dan interval 95% selisih rata-rata tunggu. Drawer **Tersimpan** menyimpan, memuat dan menghapus hingga 10 konfigurasi di browser ini. AirShift belum diimplementasikan.
 
 ## Menjalankan lokal
 
@@ -47,9 +47,11 @@ Setelah redesign kaca dan ruang 3D (27 Oktober 2026), `npm run check` lulus deng
 
 Setelah perbandingan A/B (27 Oktober 2026), `npm run check` lulus dengan **530 tes Vitest pada 9 file**, build produksi dan **16 tes e2e Chromium**.
 
+Setelah simpan/muat lokal (28 Oktober 2026), `npm run check` lulus dengan **538 tes Vitest pada 10 file**, build produksi dan **20 tes e2e Chromium** (60/60 saat diulang 3×).
+
 ## Struktur awal
 
-`src/app/` memuat workspace (`App.tsx`), draft dan validasi form (`draft.ts`), panel parameter, panel run/hasil dan komponen dasar; `src/styles/` token DESIGN_SYSTEM dan CSS, `src/domain/` konfigurasi dan validasi, `src/simulation/` engine/RNG/metrik, `src/workers/` protokol dan runtime worker, `src/controller/` pacing dan lifecycle di main thread, `src/scene/` ruang 3D kantin (visual saja), `tests/integration/` protokol/controller, dan `tests/e2e/` alur workspace di browser. Font Plus Jakarta Sans/JetBrains Mono di-host sendiri lewat `@fontsource`; ikon dari `@phosphor-icons/react`.
+`src/app/` memuat workspace (`App.tsx`), draft dan validasi form (`draft.ts`), panel parameter, panel run/hasil dan komponen dasar; `src/styles/` token DESIGN_SYSTEM dan CSS, `src/domain/` konfigurasi dan validasi, `src/simulation/` engine/RNG/metrik, `src/workers/` protokol dan runtime worker, `src/controller/` pacing dan lifecycle di main thread, `src/scene/` ruang 3D kantin (visual saja), `src/storage/` konfigurasi tersimpan, `tests/integration/` protokol/controller, dan `tests/e2e/` alur workspace di browser. Font Plus Jakarta Sans/JetBrains Mono di-host sendiri lewat `@fontsource`; ikon dari `@phosphor-icons/react`.
 
 ## Core simulasi
 
@@ -65,6 +67,10 @@ const { result } = run.finish();
 Core tidak membaca DOM, kamera, storage atau waktu nyata. `advanceTo(t)` memajukan waktu simulasi, `pause()`/`resume()` menjaga waktu, dan `enqueueManual(count)` mencatat tambahan pada waktu canonical. Tambahan pending diproses pada advance/resume berikutnya. `snapshot()` dan `getLedger()` mengembalikan salinan terpisah. Replay memakai `createSimulation(configSnapshot, replicationIndex, inputLog)`; reset memakai konfigurasi awal tanpa log live. `promoteManualLog` menggabungkan jadwal dasar dan log untuk konfigurasi baru tanpa mengubah identitas.
 
 `finish()` sinkron untuk komputasi headless; jangan memanggilnya dari event handler UI. Batas 2.000 pelanggan menghasilkan status nonfinal, bukan penghapusan pelanggan. Metrik final hanya tersedia setelah horizon dan drain selesai.
+
+## Penyimpanan lokal
+
+Setiap konfigurasi adalah satu key `tomorrowlab:scenario:<recordId>` berisi record JSON berversi (≤100 KB, maksimal 10 key). Daftar dibentuk dengan enumerasi namespace dan validasi tiap record; record rusak atau versinya tidak didukung ditampilkan tetapi tidak dimuat dan tidak dihapus otomatis. Simpan dan hapus berjalan di dalam Web Lock `tomorrowlab:scenario-write:v1`: target dibaca ulang dan harus sama dengan yang dilihat pengguna, lalu satu `setItem`/`removeItem` dan readback. Tanpa localStorage atau Web Locks, menulis dinonaktifkan dengan alasan dan simulasi tetap berjalan di memori. Preferensi bantuan disimpan di `tomorrowlab:pref:help-seen`.
 
 ## Worker dan controller
 
@@ -83,7 +89,7 @@ Runtime worker (`src/workers/runtime.ts`) memproses satu kelompok timestamp per 
 
 Perbandingan A/B memakai worker yang sama: `controller.startComparison(a, b)` mengirim `START_COMPARISON`, worker menjalankan pasangan r=0…19 secara serial (A lalu B dengan stream `(rootSeed, r, domain)` yang sama), memeriksa identitas permintaan tiap pasangan, dan melaporkan progres dengan `jobId` batch. Selama batch, command yang menghitung run visual ditolak `BUSY`; tab tersembunyi menangguhkan batch (`SUSPEND_COMPARISON`) tanpa catch-up. Ringkasan (`src/simulation/comparison.ts`) memakai rata-rata per replikasi dan t-interval berpasangan df19 (2,093024).
 
-Bukti dan batas pengujian: [core](docs/verification/core-2026-10-26.md), [worker/controller](docs/verification/worker-2026-10-27.md), [workspace](docs/verification/workspace-2026-10-27.md), [redesign dan ruang 3D](docs/verification/redesign-3d-2026-10-27.md), [perbandingan A/B](docs/verification/comparison-2026-10-27.md).
+Bukti dan batas pengujian: [core](docs/verification/core-2026-10-26.md), [worker/controller](docs/verification/worker-2026-10-27.md), [workspace](docs/verification/workspace-2026-10-27.md), [redesign dan ruang 3D](docs/verification/redesign-3d-2026-10-27.md), [perbandingan A/B](docs/verification/comparison-2026-10-27.md), [simpan/muat lokal](docs/verification/storage-2026-10-28.md).
 
 ## Acuan dan scope berikutnya
 
@@ -94,7 +100,7 @@ Bukti dan batas pengujian: [core](docs/verification/core-2026-10-26.md), [worker
 - [Spesifikasi simulasi](SIMULATION_SPEC.md): model, RNG dan fixture numerik.
 - [Roadmap](ROADMAP.md): tahapan dan gate penerimaan.
 
-Berikutnya: simpan/muat lokal (WP-09), lalu hardening dan uji lintas browser (WP-10). Hasil simulasi tidak boleh digantikan animasi atau angka contoh.
+Berikutnya: hardening, uji lintas browser, aksesibilitas dan performa (WP-10), lalu build produksi dan submission (WP-11). Hasil simulasi tidak boleh digantikan animasi atau angka contoh.
 
 Bootstrap lokal tidak menyelesaikan seluruh gate M0: owner/kapasitas tim, perangkat QA, host HTTPS, base path dan kebijakan deployment, serta eligibility/akses submission masih perlu ditetapkan. Smoke Chromium bukan audit aksesibilitas menyeluruh atau verifikasi lintas browser.
 # TommorowLab

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import {
   ArrowArcLeft, ArrowArcRight, ArrowClockwise, ArrowCounterClockwise, ArrowLeft, ArrowRight, CameraSlash, CaretDown, CaretUp,
-  CheckCircle, CircleDashed, Cube, CursorClick, EyeSlash, FastForward, Flask, FrameCorners, HandGrabbing, Hourglass,
+  CheckCircle, CircleDashed, FloppyDisk, FolderOpen, Cube, CursorClick, EyeSlash, FastForward, Flask, FrameCorners, HandGrabbing, Hourglass,
   HourglassMedium, Info, ListBullets, LockSimple, MagnifyingGlassMinus, MagnifyingGlassPlus, Minus, Pause, PencilSimple,
   PersonSimpleWalk, Play, PlayCircle, Plus, Question, Queue, Scales, Shuffle, SlidersHorizontal, Stop, Timer, Trash, UserPlus,
   UsersThree, Warning, X,
@@ -17,7 +17,7 @@ const GLYPHS = {
   zoomOut: MagnifyingGlassMinus, frame: FrameCorners, grab: HandGrabbing, hidden: EyeSlash, hourglass: Hourglass, idle: CircleDashed,
   close: X, next: ArrowRight, back: ArrowLeft, sliders: SlidersHorizontal, playCircle: PlayCircle, cursor: CursorClick, flask: Flask,
   users: UsersThree, timer: Timer, queue: Queue, drain: HourglassMedium, walk: PersonSimpleWalk, shuffle: Shuffle,
-  cameraOff: CameraSlash, caretDown: CaretDown, caretUp: CaretUp, scales: Scales,
+  cameraOff: CameraSlash, caretDown: CaretDown, caretUp: CaretUp, scales: Scales, folder: FolderOpen, save: FloppyDisk,
 } satisfies Record<string, PhosphorIcon>;
 export type IconName = keyof typeof GLYPHS;
 
