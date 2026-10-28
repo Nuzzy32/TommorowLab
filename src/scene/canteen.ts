@@ -37,12 +37,13 @@ const counterXs = (c: number): [number[], number] => {
   for (let i = 0; i < c; i++) o.push((i - (c - 1) / 2) * sp);
   return [o, Math.min(1.8, sp - 0.45)];
 };
-// ≤4 fps for this many frames in a row: the 3D view would make every control sluggish (NFR-03 light mode).
-const SLOW_FRAME_MS = 250;
-const SLOW_FRAMES = 6;
+// Mostly below ~8 fps over the last frames: the 3D view would make every control sluggish (NFR-03 light mode).
+const SLOW_FRAME_MS = 120;
+const SLOW_WINDOW = 15;
+const SLOW_IN_WINDOW = 12;
 const LABEL_FONT = '"Plus Jakarta Sans", system-ui, sans-serif';
 
-/** `onTooSlow` fires once if frames keep taking longer than SLOW_FRAME_MS, e.g. software WebGL on a weak device. */
+/** `onTooSlow` fires once if most recent frames take longer than SLOW_FRAME_MS, e.g. software WebGL on a weak device. */
 export function createCanteen(host: HTMLElement, onContextLost: () => void, onTooSlow: (() => void) | null = null): CanteenScene {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -440,17 +441,19 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
   ro.observe(host);
 
   const tgt = new THREE.Vector3(0.4, 0, 1.4), tmp = new THREE.Vector3();
-  let raf = 0, prev = performance.now(), slowFrames = 0, wasHidden = false;
+  let raf = 0, prev = performance.now(), wasHidden = false;
+  const gaps: boolean[] = [];
   function frame(now: number) {
     raf = requestAnimationFrame(frame);
     const dt = Math.min(0.05, (now - prev) / 1000);
     const gap = now - prev;
     prev = now;
     if (document.hidden || !W) { wasHidden = true; return; }
-    // Gaps spanning a hidden period are not rendering cost; only consecutive slow frames count.
+    // Gaps spanning a hidden period are not rendering cost.
     if (onTooSlow && !wasHidden) {
-      slowFrames = gap > SLOW_FRAME_MS ? slowFrames + 1 : 0;
-      if (slowFrames >= SLOW_FRAMES) { const notify = onTooSlow; onTooSlow = null; notify(); }
+      gaps.push(gap > SLOW_FRAME_MS);
+      if (gaps.length > SLOW_WINDOW) gaps.shift();
+      if (gaps.filter(Boolean).length >= SLOW_IN_WINDOW) { const notify = onTooSlow; onTooSlow = null; notify(); }
     }
     wasHidden = false;
     if (last && last.resetNonce !== nonce) { if (nonce !== null) { dAz = 0; dPol = 0; wz = 1; } nonce = last.resetNonce; }
