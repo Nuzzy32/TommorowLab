@@ -1,0 +1,5 @@
+gesture_recognizer.task — MediaPipe Gesture Recognizer (float16, version 1)
+Source: https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task
+SHA-256: 97952348cf6a6a4915c2ea1496b4b37ebabc50cbbf80571435643c455f2b0482
+License: Apache License 2.0 (Google LLC). Runtime: @mediapipe/tasks-vision 1.2.0, Apache-2.0.
+Used only for on-device hand-pose recognition; frames are never sent or stored.

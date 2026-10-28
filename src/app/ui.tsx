@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import {
   ArrowArcLeft, ArrowArcRight, ArrowClockwise, ArrowCounterClockwise, ArrowLeft, ArrowRight, CameraSlash, CaretDown, CaretUp,
-  CheckCircle, CircleDashed, FloppyDisk, FolderOpen, Cube, CursorClick, EyeSlash, FastForward, Flask, FrameCorners, HandGrabbing, Hourglass,
+  Camera, CheckCircle, CircleDashed, FloppyDisk, FolderOpen, HandPalm, ThumbsUp, Cube, CursorClick, EyeSlash, FastForward, Flask, FrameCorners, HandGrabbing, Hourglass,
   HourglassMedium, Info, ListBullets, LockSimple, MagnifyingGlassMinus, MagnifyingGlassPlus, Minus, Pause, PencilSimple,
   PersonSimpleWalk, Play, PlayCircle, Plus, Question, Queue, Scales, Shuffle, SlidersHorizontal, Stop, Timer, Trash, UserPlus,
   UsersThree, Warning, X,
@@ -17,13 +17,21 @@ const GLYPHS = {
   zoomOut: MagnifyingGlassMinus, frame: FrameCorners, grab: HandGrabbing, hidden: EyeSlash, hourglass: Hourglass, idle: CircleDashed,
   close: X, next: ArrowRight, back: ArrowLeft, sliders: SlidersHorizontal, playCircle: PlayCircle, cursor: CursorClick, flask: Flask,
   users: UsersThree, timer: Timer, queue: Queue, drain: HourglassMedium, walk: PersonSimpleWalk, shuffle: Shuffle,
-  cameraOff: CameraSlash, caretDown: CaretDown, caretUp: CaretUp, scales: Scales, folder: FolderOpen, save: FloppyDisk,
+  cameraOff: CameraSlash, caretDown: CaretDown, caretUp: CaretUp, scales: Scales, folder: FolderOpen, save: FloppyDisk, hand: HandPalm, thumbsUp: ThumbsUp, camera: Camera,
 } satisfies Record<string, PhosphorIcon>;
 export type IconName = keyof typeof GLYPHS;
 
 export function Icon({ name, size = 17, weight = 'bold' }: { name: IconName; size?: number; weight?: IconWeight }) {
   const Glyph = GLYPHS[name];
   return <Glyph className="icon" size={size} weight={weight} aria-hidden="true" focusable="false" />;
+}
+
+// Safari does not focus a button on click, so the dialog trigger is also remembered from the pointer.
+let lastPressed: HTMLElement | null = null;
+if (typeof document !== 'undefined') {
+  document.addEventListener('pointerdown', event => {
+    lastPressed = event.target instanceof Element ? event.target.closest<HTMLElement>('button, a, [tabindex]') : null;
+  }, true);
 }
 
 /** Native modal dialog: focus trap, inert background and Escape come from the platform. */
@@ -36,7 +44,8 @@ export function DialogShell({ open, onClose, className = 'dialog', labelledBy, d
     const dialog = ref.current;
     if (!dialog) return;
     if (open && !dialog.open) {
-      returnTo.current = document.activeElement as HTMLElement | null;
+      const active = document.activeElement as HTMLElement | null;
+      returnTo.current = active && active !== document.body ? active : lastPressed;
       dialog.showModal();
     } else if (!open && dialog.open) dialog.close();
     if (!open && returnTo.current) {

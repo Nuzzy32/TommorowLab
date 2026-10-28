@@ -304,6 +304,19 @@ test('UF-09/10/11 A=B is identical, then a third counter gives a paired result a
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test('workspace tabs follow the ARIA tabs keyboard pattern', async ({ page }) => {
+  await open(page);
+  const sim = page.getByRole('tab', { name: 'Simulasi' });
+  await sim.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: 'Bandingkan' })).toBeFocused();
+  await expect(page.getByRole('tab', { name: 'Bandingkan' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('heading', { name: 'Belum ada baseline A' })).toBeVisible();
+  await page.keyboard.press('Home');
+  await expect(sim).toBeFocused();
+  await expect(sim).toHaveAttribute('aria-selected', 'true');
+});
+
 test('opening Bandingkan while running asks to pause first and keeps the run paused', async ({ page }) => {
   await open(page);
   await primary(page).click();

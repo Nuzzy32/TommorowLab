@@ -19,9 +19,9 @@ const STATUS_TONE: Record<RunStatus, [string, IconName]> = {
 };
 const INVALID = new Set<RunStatus>(['ERROR', 'LIMIT_REACHED', 'CANCELLED']);
 
-export function StatusStrip({ status, phase, simTimeSec, horizonSec, fastMode, pauseReason, seed, speed, drainSec, children }: {
+export function StatusStrip({ status, phase, simTimeSec, horizonSec, fastMode, pauseReason, seed, speed, drainSec, control, children }: {
   status: RunStatus; phase: 'arrivalsOpen' | 'draining'; simTimeSec: number; horizonSec: number | null;
-  fastMode: boolean; pauseReason: string | null; seed: string; speed: number; drainSec: number | null; children?: ReactNode;
+  fastMode: boolean; pauseReason: string | null; seed: string; speed: number; drainSec: number | null; control: string; children?: ReactNode;
 }) {
   const [tone, icon] = STATUS_TONE[status];
   const label = fastMode && status === 'RUNNING' ? 'Menyelesaikan run…' : STATUS_LABEL[status];
@@ -40,7 +40,8 @@ export function StatusStrip({ status, phase, simTimeSec, horizonSec, fastMode, p
       </div>
       <div className="status-clock">
         <span className="label">Waktu simulasi</span>
-        <span className="timer" aria-label={spokenClock(simTimeSec)}>{formatClock(simTimeSec)}</span>
+        <span className="timer" aria-hidden="true">{formatClock(simTimeSec)}</span>
+        <span className="sr-only">{spokenClock(simTimeSec)}</span>
       </div>
       <div className="status-progress">
         <div className="progress" aria-hidden="true"><span style={{ width: `${(progress * 100).toFixed(2)}%` }} /></div>
@@ -49,7 +50,7 @@ export function StatusStrip({ status, phase, simTimeSec, horizonSec, fastMode, p
           <span>{drainSec !== null ? `Penyelesaian sisa ${formatSeconds(drainSec)}` : draining ? 'Menyelesaikan sisa pelanggan' : `Kecepatan ${speed}×`}</span>
         </p>
       </div>
-      <div className="status-chips"><span className="chip mono">seed {seed || '—'}</span></div>
+      <div className="status-chips"><span className="chip mono">seed {seed || '—'}</span><span className="chip"><Icon name={control === 'Kontrol manual' ? 'cursor' : 'hand'} size={14} />{control}</span></div>
       {children}
     </section>
   );

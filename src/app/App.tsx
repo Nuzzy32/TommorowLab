@@ -11,6 +11,9 @@ import type { Ack } from '../workers/protocol';
 import { buildConfig, draftReducer, FIELD_ORDER, fieldValue, horizonSec, initialDraft, outOfRange, parseNumber } from './draft';
 import { formatClock } from './format';
 import { ParameterPanel } from './ParameterPanel';
+import { gestureBlocked, initialGate, stepGate } from '../airshift/gate';
+import { AIRSHIFT_ENABLED, AirShiftPanel, cameraOn } from './AirShiftPanel';
+import type { AirView } from './AirShiftPanel';
 import { ComparePanel } from './ComparePanel';
 import type { Baseline } from './ComparePanel';
 import { InputLog, Results, SceneBox, STATUS_LABEL, StatusStrip } from './RunPanels';
@@ -19,6 +22,9 @@ import type { SaveRequest } from './SavedPanels';
 import { ConfirmDialog, DialogShell, Icon } from './ui';
 import type { IconName } from './ui';
 
+// Lazy: the camera adapter, inference worker, Wasm and model are fetched only after opt-in, and a
+// VITE_AIRSHIFT=0 build folds this to null so none of them are emitted (ROADMAP §7.2 no-go).
+const loadCamera = import.meta.env.VITE_AIRSHIFT === '0' ? null : () => import('../airshift/camera');
 const EMPTY_VIEW: ControllerView = { projection: null, state: null, speed: 20, transitioning: false, failure: null, comparison: null, lastComparison: null };
 const noSubscribe = () => () => {};
 const emptyView = () => EMPTY_VIEW;
@@ -98,6 +104,12 @@ export function App() {
   // Identity of the open scenario and, when it came from (or was written to) a slot, what that slot held.
   const [identity, setIdentity] = useState<Pick<ScenarioConfig, 'id' | 'name'>>({ id: DEFAULT_CONFIG.id, name: DEFAULT_CONFIG.name });
   const [loaded, setLoaded] = useState<Expected | null>(null);
+  const [airOpen, setAirOpen] = useState(false);
+  const [air, setAir] = useState<AirView>({ status: 'off', message: null, progress: 0, pose: null, feedback: null });
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const camera = useRef<{ stop(): void } | null>(null);
+  const gate = useRef(initialGate());
+  const gestureRef = useRef<(action: 'pause' | 'resume') => void>(() => {});
   const [helpStep, setHelpStep] = useState(0);
   const [addCount, setAddCount] = useState('1');
   const [addError, setAddError] = useState<string>();
@@ -208,6 +220,66 @@ export function App() {
     setCompareConfirm(null);
     void act(() => controller!.pause(), () => setTab('compare'));
   }
+
+  // AirShift only sends intents; the controller and worker still validate them (ARCHITECTURE §11.2).
+  gestureRef.current = action => {
+    const reason = gestureBlocked({
+      action, status, pauseReason: projection?.pauseReason ?? null, fast, batchActive,
+      dialogOpen: document.querySelector('dialog[open]') !== null,
+      typing: document.activeElement?.matches('input:not([type="radio"]):not([type="checkbox"]):not([type="range"]), textarea, select') ?? false,
+      hidden: document.visibilityState === 'hidden',
+    });
+    if (reason) { setAir(current => ({ ...current, feedback: `Gesture dikenali, tetapi tidak dijalankan: ${reason}` })); return; }
+    setAir(current => ({ ...current, feedback: action === 'pause' ? 'Dijeda lewat AirShift.' : 'Dilanjutkan lewat AirShift.' }));
+    setAnnouncement(action === 'pause' ? 'Simulasi dijeda lewat AirShift.' : 'Simulasi dilanjutkan lewat AirShift.');
+    void act(() => (action === 'pause' ? controller!.pause('gesture') : controller!.resume('gesture')));
+  };
+
+  function stopAir(message: string | null = null) {
+    camera.current?.stop();
+    camera.current = null;
+    gate.current = initialGate();
+    setAir({ status: 'off', message, progress: 0, pose: null, feedback: null });
+  }
+
+  async function enableAir() {
+    if (!AIRSHIFT_ENABLED || camera.current || !videoRef.current) return;
+    const video = videoRef.current;
+    gate.current = initialGate();
+    setAir({ status: 'requesting', message: null, progress: 0, pose: null, feedback: null });
+    const { startCamera } = await loadCamera!();
+    if (camera.current) return;
+    camera.current = startCamera(video, {
+      onStatus: (next, message) => {
+        if (next === 'error') { camera.current = null; setAir({ status: 'error', message: message ?? null, progress: 0, pose: null, feedback: null }); }
+        else setAir(current => ({ ...current, status: next === 'running' ? 'ready' : next }));
+      },
+      onSample: sample => {
+        const output = stepGate(gate.current, sample, performance.now());
+        gate.current = output.state;
+        setAir(current => ({ ...current, status: output.status, progress: output.progress, pose: output.pose }));
+        if (output.action) gestureRef.current(output.action);
+      },
+    });
+  }
+
+  // Hidden tab or unmount: stop tracks and inference at once; turning the camera on again needs a new click.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden' && camera.current) {
+        camera.current.stop();
+        camera.current = null;
+        gate.current = initialGate();
+        setAir({ status: 'off', message: 'Kamera dimatikan karena tab tidak aktif. Aktifkan lagi secara manual bila perlu.', progress: 0, pose: null, feedback: null });
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      camera.current?.stop();
+      camera.current = null;
+    };
+  }, []);
 
   const refreshSaved = useCallback(() => setListing(store.list()), [store]);
   useEffect(() => {
@@ -366,7 +438,14 @@ export function App() {
             <a className="wordmark" href="./">Tomorrow<span>Lab</span></a>
             <span className="tagline">Coba skenario. Pahami dampaknya.</span>
           </div>
-          <div className="tabs" role="tablist" aria-label="Area kerja">
+          <div className="tabs" role="tablist" aria-label="Area kerja" onKeyDown={event => {
+            // ARIA tabs pattern: arrows/Home/End move between tabs; only the selected tab is in the Tab order.
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const next = event.key === 'Home' ? 'sim' : event.key === 'End' ? 'compare' : tab === 'sim' ? 'compare' : 'sim';
+            if (next === 'compare') openCompare(); else setTab('sim');
+            document.getElementById(next === 'sim' ? 'tab-sim' : 'tab-compare')?.focus();
+          }}>
             <button type="button" role="tab" id="tab-sim" aria-controls="main" aria-selected={tab === 'sim'} tabIndex={tab === 'sim' ? 0 : -1}
               onClick={() => setTab('sim')}><Icon name="flask" size={16} />Simulasi</button>
             <button type="button" role="tab" id="tab-compare" aria-controls="panel-compare" aria-selected={tab === 'compare'} tabIndex={tab === 'compare' ? 0 : -1}
@@ -378,20 +457,31 @@ export function App() {
             <p>{loaded ? 'Tersimpan di browser ini' : 'Belum disimpan'} · data sintetis</p>
           </div>
           <nav className="header-actions" aria-label="Informasi">
+            {cameraOn(air.status) && !airOpen && (
+              <span className="camera-chip"><span className="dot" aria-hidden="true" />Kamera aktif
+                <button type="button" className="button compact" onClick={() => stopAir()}>Matikan</button></span>
+            )}
             <button type="button" className="button compact" onClick={() => { refreshSaved(); setSavedStale(false); setSavedNotice(null); setSavedOpen(true); }}><Icon name="folder" /><span>Tersimpan</span></button>
             <button type="button" className="button compact" onClick={() => setAssumptionsOpen(true)}><Icon name="info" /><span>Asumsi</span></button>
+            {AIRSHIFT_ENABLED && (
+              <button type="button" className="button compact" aria-expanded={airOpen} aria-controls="airshift" onClick={() => setAirOpen(!airOpen)}><Icon name="hand" /><span>AirShift</span></button>
+            )}
             <button type="button" className="button compact" onClick={() => { setHelpStep(0); setHelpOpen(true); }}><Icon name="help" /><span>Bantuan</span></button>
           </nav>
         </header>
 
         <StatusStrip status={status} phase={phase} simTimeSec={simTime} horizonSec={horizon} fastMode={fast}
           pauseReason={projection?.pauseReason ?? null} seed={seed} speed={view.speed}
+          control={cameraOn(air.status) ? 'Manual + AirShift' : 'Kontrol manual'}
           drainSec={status === 'COMPLETED' ? projection?.result?.drainDurationSec ?? null : null}>
           {batchActive && (
             <p className="callout info"><Icon name="scales" /><span>Perbandingan A/B sedang berjalan di tab Bandingkan; run Simulasi tidak dihitung bersamaan.</span></p>
           )}
           {view.failure && (
             <p className="callout danger" role="alert"><Icon name="warning" /><span>Worker simulasi berhenti. Reset untuk memulai lagi dengan parameter yang sama.</span></p>
+          )}
+          {status === 'PAUSED' && projection?.pauseReason === 'gesture' && (
+            <p className="callout info"><Icon name="hand" /><span>Dijeda lewat AirShift. Jempol ke atas atau tombol Lanjutkan untuk melanjutkan.</span></p>
           )}
           {hiddenPause && (
             <p className="callout warning"><Icon name="hidden" /><span>Dijeda karena tab tidak aktif. Lanjutkan saat siap.</span></p>
@@ -469,6 +559,11 @@ export function App() {
       </div>
 
       <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
+      {AIRSHIFT_ENABLED && (
+        <div id="airshift">
+          <AirShiftPanel open={airOpen} view={air} videoRef={videoRef} onEnable={() => void enableAir()} onStop={() => stopAir()} onClose={() => setAirOpen(false)} />
+        </div>
+      )}
 
       <DialogShell open={helpOpen} className="dialog help" labelledBy="help-title" describedBy="help-body"
         onClose={() => { setHelpOpen(false); setFocusTarget('workspace-title'); }}>

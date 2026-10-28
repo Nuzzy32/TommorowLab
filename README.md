@@ -2,7 +2,7 @@
 
 Coba skenario. Pahami dampaknya.
 
-SPA statis untuk simulator antrean kantin kampus. Kontrak data, validator, PCG32, core simulasi FIFO dan metrik sudah tersedia sebagai TypeScript murni dengan pengujian numerik. Adapter Web Worker, controller main thread dan workspace dengan kontrol manual (UF-01–08) sudah berjalan: atur skenario dan jadwal, jalankan, jeda, tambah pelanggan, selesaikan cepat, ulangi dan reset, dengan ruang 3D kantin (three.js, dimuat lazy) atau tampilan ringkas, grafik panjang antrean dan hasil final. Tampilan mengikuti arah visual kaca DESIGN_SYSTEM v1.1. Tab **Bandingkan** menjalankan 20 pasangan replikasi A/B dengan permintaan yang sama (CRN) dan interval 95% selisih rata-rata tunggu. Drawer **Tersimpan** menyimpan, memuat dan menghapus hingga 10 konfigurasi di browser ini. AirShift belum diimplementasikan.
+SPA statis untuk simulator antrean kantin kampus. Kontrak data, validator, PCG32, core simulasi FIFO dan metrik sudah tersedia sebagai TypeScript murni dengan pengujian numerik. Adapter Web Worker, controller main thread dan workspace dengan kontrol manual (UF-01–08) sudah berjalan: atur skenario dan jadwal, jalankan, jeda, tambah pelanggan, selesaikan cepat, ulangi dan reset, dengan ruang 3D kantin (three.js, dimuat lazy) atau tampilan ringkas, grafik panjang antrean dan hasil final. Tampilan mengikuti arah visual kaca DESIGN_SYSTEM v1.1. Tab **Bandingkan** menjalankan 20 pasangan replikasi A/B dengan permintaan yang sama (CRN) dan interval 95% selisih rata-rata tunggu. Drawer **Tersimpan** menyimpan, memuat dan menghapus hingga 10 konfigurasi di browser ini. **AirShift** (opsional, flag `VITE_AIRSHIFT`, default aktif) mengenali telapak terbuka/jempol ke atas lewat kamera secara lokal untuk pause/lanjut; gate produknya masih menunggu uji manusia, jadi bangun dengan `VITE_AIRSHIFT=0` bila keputusannya no-go.
 
 ## Menjalankan lokal
 
@@ -18,11 +18,11 @@ Buka alamat lokal yang ditampilkan Vite. Aplikasi tidak meminta kamera, memakai 
 ## Pemeriksaan
 
 ```sh
-npx playwright install chromium
+npx playwright install chromium firefox webkit
 npm run check
 ```
 
-`check` menjalankan typecheck, Vitest, build produksi, lalu Playwright Chromium terhadap hasil `dist/`. Tes browser menyalakan preview pada `127.0.0.1:4173`; port harus kosong. Build produksi dibuat terpisah dari typecheck sesuai [Vite](https://vite.dev/guide/).
+`check` menjalankan typecheck, Vitest, build produksi, lalu Playwright (Chromium, Firefox, WebKit) terhadap hasil `dist/`. Tes browser menyalakan preview pada `127.0.0.1:4173`; port harus kosong. Build produksi dibuat terpisah dari typecheck sesuai [Vite](https://vite.dev/guide/).
 
 | Perintah | Fungsi |
 |---|---|
@@ -49,9 +49,11 @@ Setelah perbandingan A/B (27 Oktober 2026), `npm run check` lulus dengan **530 t
 
 Setelah simpan/muat lokal (28 Oktober 2026), `npm run check` lulus dengan **538 tes Vitest pada 10 file**, build produksi dan **20 tes e2e Chromium** (60/60 saat diulang 3×).
 
+Setelah hardening WP-10 (28 Oktober 2026), `npm run check` lulus dengan **539 tes Vitest**, build produksi dan **72 tes e2e** di Chromium, Firefox dan WebKit (termasuk audit axe WCAG 2.2 AA dan benchmark indikatif). Setelah AirShift, totalnya **545 tes Vitest pada 11 file** dan **75 tes e2e** (150/150 saat diulang 2×).
+
 ## Struktur awal
 
-`src/app/` memuat workspace (`App.tsx`), draft dan validasi form (`draft.ts`), panel parameter, panel run/hasil dan komponen dasar; `src/styles/` token DESIGN_SYSTEM dan CSS, `src/domain/` konfigurasi dan validasi, `src/simulation/` engine/RNG/metrik, `src/workers/` protokol dan runtime worker, `src/controller/` pacing dan lifecycle di main thread, `src/scene/` ruang 3D kantin (visual saja), `src/storage/` konfigurasi tersimpan, `tests/integration/` protokol/controller, dan `tests/e2e/` alur workspace di browser. Font Plus Jakarta Sans/JetBrains Mono di-host sendiri lewat `@fontsource`; ikon dari `@phosphor-icons/react`.
+`src/app/` memuat workspace (`App.tsx`), draft dan validasi form (`draft.ts`), panel parameter, panel run/hasil dan komponen dasar; `src/styles/` token DESIGN_SYSTEM dan CSS, `src/domain/` konfigurasi dan validasi, `src/simulation/` engine/RNG/metrik, `src/workers/` protokol dan runtime worker, `src/controller/` pacing dan lifecycle di main thread, `src/scene/` ruang 3D kantin (visual saja), `src/storage/` konfigurasi tersimpan, `tests/integration/` protokol/controller, dan `tests/e2e/` alur workspace di browser. Font Plus Jakarta Sans/JetBrains Mono di-host sendiri lewat `@fontsource`; ikon dari `@phosphor-icons/react`. `src/airshift/` berisi gate pose, adapter kamera dan worker MediaPipe; model ada di `src/airshift/gesture_recognizer.task` (lihat `src/airshift/NOTICE.txt`).
 
 ## Core simulasi
 
@@ -89,7 +91,7 @@ Runtime worker (`src/workers/runtime.ts`) memproses satu kelompok timestamp per 
 
 Perbandingan A/B memakai worker yang sama: `controller.startComparison(a, b)` mengirim `START_COMPARISON`, worker menjalankan pasangan r=0…19 secara serial (A lalu B dengan stream `(rootSeed, r, domain)` yang sama), memeriksa identitas permintaan tiap pasangan, dan melaporkan progres dengan `jobId` batch. Selama batch, command yang menghitung run visual ditolak `BUSY`; tab tersembunyi menangguhkan batch (`SUSPEND_COMPARISON`) tanpa catch-up. Ringkasan (`src/simulation/comparison.ts`) memakai rata-rata per replikasi dan t-interval berpasangan df19 (2,093024).
 
-Bukti dan batas pengujian: [core](docs/verification/core-2026-10-26.md), [worker/controller](docs/verification/worker-2026-10-27.md), [workspace](docs/verification/workspace-2026-10-27.md), [redesign dan ruang 3D](docs/verification/redesign-3d-2026-10-27.md), [perbandingan A/B](docs/verification/comparison-2026-10-27.md), [simpan/muat lokal](docs/verification/storage-2026-10-28.md).
+Bukti dan batas pengujian: [core](docs/verification/core-2026-10-26.md), [worker/controller](docs/verification/worker-2026-10-27.md), [workspace](docs/verification/workspace-2026-10-27.md), [redesign dan ruang 3D](docs/verification/redesign-3d-2026-10-27.md), [perbandingan A/B](docs/verification/comparison-2026-10-27.md), [simpan/muat lokal](docs/verification/storage-2026-10-28.md), [hardening](docs/verification/hardening-2026-10-28.md), [AirShift](docs/verification/airshift-2026-10-28.md).
 
 ## Acuan dan scope berikutnya
 

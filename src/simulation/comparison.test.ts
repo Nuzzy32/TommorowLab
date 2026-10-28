@@ -92,3 +92,35 @@ describe('fairness and pairing', () => {
     expect(sameDemand(a.customers, other.finish().customers)).toBe(false);
   });
 });
+
+describe('100-seed batch corpus (QA-03 for pairs)', () => {
+  const batch = (a: ScenarioConfig, b: ScenarioConfig) => Array.from({ length: PAIRS }, (_, r): PairResult => {
+    const run = (config: ScenarioConfig) => {
+      const sim = createSimulation(config, r); sim.start();
+      const done = sim.finish();
+      return { done, summary: replicationSummary(done.result!) };
+    };
+    const left = run(a); const right = run(b);
+    expect(sameDemand(left.done.customers, right.done.customers)).toBe(true);
+    return { r, a: left.summary, b: right.summary };
+  });
+
+  it('every seed gives 20 valid pairs on shared demand, a finite CI and a verdict that matches its sign', () => {
+    const verdicts = new Map<string, number>();
+    for (let seed = 0; seed < 100; seed++) {
+      const a: ScenarioConfig = { ...DEFAULT_CONFIG, rootSeed: seed, horizonSec: 300, lambdaPerMinute: 3 + (seed % 3) * 3 };
+      const summary = summarize(batch(a, { ...a, c: a.c + (seed % 2), serviceMaxSec: 40 - (seed % 4) * 5 }), false);
+      expect(summary.pairs).toBe(20);
+      if (summary.emptyPairs > 0) {
+        expect(summary).toMatchObject({ ci95: null, verdict: 'INSUFFICIENT_DATA' });
+      } else {
+        const [lo, hi] = summary.ci95!;
+        expect(Number.isFinite(lo) && Number.isFinite(hi) && lo <= summary.meanDeltaSec! && summary.meanDeltaSec! <= hi).toBe(true);
+        expect(summary.verdict).toBe(hi < 0 ? 'B_LOWER' : lo > 0 ? 'B_HIGHER' : 'INCONCLUSIVE');
+      }
+      verdicts.set(summary.verdict, (verdicts.get(summary.verdict) ?? 0) + 1);
+    }
+    // The corpus exercises more than one interpretation, not only the easy case.
+    expect(verdicts.size).toBeGreaterThan(1);
+  }, 60_000);
+});
