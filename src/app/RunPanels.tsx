@@ -57,7 +57,7 @@ export function StatusStrip({ status, phase, simTimeSec, horizonSec, fastMode, p
 }
 
 const SCENE_SHOWN = 40;
-type SceneState = 'loading' | 'ready' | 'compact' | 'unsupported' | 'failed';
+type SceneState = 'loading' | 'ready' | 'compact' | 'unsupported' | 'failed' | 'slow';
 
 function supportsWebGL() {
   try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; }
@@ -84,6 +84,7 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
   };
   const latest = useRef(view);
   latest.current = view;
+  const forced = useRef(false);
 
   useEffect(() => {
     if (!wants3d) return;
@@ -92,7 +93,9 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
     let created: CanteenScene | null = null;
     import('../scene/canteen').then(module => {
       if (cancelled || !host.current) return;
-      created = module.createCanteen(host.current, () => { if (!cancelled) setMode('failed'); });
+      created = module.createCanteen(host.current, () => { if (!cancelled) setMode('failed'); },
+        // A user who asks for 3D again after a slow fallback keeps it.
+        forced.current ? null : () => { if (!cancelled) setMode('slow'); });
       created.update(latest.current);
       scene.current = created;
       setMode('ready');
@@ -115,11 +118,11 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
 
   return (
     <>
-      {(mode === 'unsupported' || mode === 'failed') && (
+      {(mode === 'unsupported' || mode === 'failed' || mode === 'slow') && (
         <div className="callout info" role="status">
           <Icon name="cube" />
-          <span>{mode === 'unsupported' ? 'Ruang 3D tidak didukung perangkat ini.' : 'Ruang 3D berhenti.'} Menampilkan tampilan ringkas; simulasi tidak terpengaruh.</span>
-          {mode === 'failed' && <button type="button" className="button compact" onClick={() => setMode('loading')}>Coba 3D lagi</button>}
+          <span>{mode === 'unsupported' ? 'Ruang 3D tidak didukung perangkat ini.' : mode === 'slow' ? 'Ruang 3D terlalu berat untuk perangkat ini.' : 'Ruang 3D berhenti.'} Menampilkan tampilan ringkas; simulasi tidak terpengaruh.</span>
+          {mode !== 'unsupported' && <button type="button" className="button compact" onClick={() => { forced.current = mode === 'slow'; setMode('loading'); }}>Coba 3D lagi</button>}
         </div>
       )}
       <div className="scene-box">

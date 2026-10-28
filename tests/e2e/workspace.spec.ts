@@ -248,8 +248,22 @@ for (const width of [360, 640, 768, 1280]) {
   });
 }
 
+// Headless Linux Firefox has no WebGL2 and Linux WebKit renders in software at a few fps; both are
+// covered by the fallback tests, so this one needs a usable GPU path.
+async function skipWithoutFast3d(page: Page) {
+  const fps = await page.evaluate(() => new Promise<number>(resolve => {
+    if (!document.createElement('canvas').getContext('webgl2')) { resolve(0); return; }
+    let frames = 0;
+    const start = performance.now();
+    const tick = () => { frames++; if (performance.now() - start < 1000) requestAnimationFrame(tick); else resolve(frames); };
+    requestAnimationFrame(tick);
+  }));
+  test.skip(fps < 10, `3D path not usable here (${fps} fps)`);
+}
+
 test('3D scene loads lazily, toggles to the compact view and back', async ({ page }) => {
   await open(page);
+  await skipWithoutFast3d(page);
   await expect(page.locator('.scene-canvas')).toBeVisible();
   await expect(page.getByText('Memuat ruang 3D…')).toHaveCount(0);
   await primary(page).click();
@@ -261,6 +275,22 @@ test('3D scene loads lazily, toggles to the compact view and back', async ({ pag
   await expect(page.locator('.scene-canvas')).toHaveCount(1);
   await page.getByRole('button', { name: 'Putar kanan' }).click();
   await page.getByRole('button', { name: 'Reset tampilan' }).click();
+});
+
+test('a 3D view that renders too slowly falls back to the compact view; asking again keeps 3D', async ({ page }) => {
+  test.skip(await page.evaluate(() => !document.createElement('canvas').getContext('webgl2')).catch(() => true), 'no WebGL2');
+  // Simulate a weak device: every animation frame arrives 400 ms late.
+  await page.addInitScript(() => {
+    window.requestAnimationFrame = callback => window.setTimeout(() => callback(performance.now()), 400);
+  });
+  await open(page);
+  await expect(page.getByText('Ruang 3D terlalu berat untuk perangkat ini.', { exact: false })).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.scene-canvas')).toHaveCount(0);
+  await expect(page.getByRole('list', { name: 'Status loket' })).toBeVisible();
+  await page.getByRole('button', { name: 'Coba 3D lagi' }).click();
+  await expect(page.locator('.scene-canvas')).toHaveCount(1);
+  await page.waitForTimeout(4000);
+  await expect(page.locator('.scene-canvas')).toHaveCount(1);
 });
 
 test('without WebGL the stage falls back to the compact view and the run still works', async ({ page }) => {

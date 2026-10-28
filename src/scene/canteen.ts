@@ -37,9 +37,13 @@ const counterXs = (c: number): [number[], number] => {
   for (let i = 0; i < c; i++) o.push((i - (c - 1) / 2) * sp);
   return [o, Math.min(1.8, sp - 0.45)];
 };
+// ≤4 fps for this many frames in a row: the 3D view would make every control sluggish (NFR-03 light mode).
+const SLOW_FRAME_MS = 250;
+const SLOW_FRAMES = 6;
 const LABEL_FONT = '"Plus Jakarta Sans", system-ui, sans-serif';
 
-export function createCanteen(host: HTMLElement, onContextLost: () => void): CanteenScene {
+/** `onTooSlow` fires once if frames keep taking longer than SLOW_FRAME_MS, e.g. software WebGL on a weak device. */
+export function createCanteen(host: HTMLElement, onContextLost: () => void, onTooSlow: (() => void) | null = null): CanteenScene {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));
@@ -436,12 +440,19 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void): Can
   ro.observe(host);
 
   const tgt = new THREE.Vector3(0.4, 0, 1.4), tmp = new THREE.Vector3();
-  let raf = 0, prev = performance.now();
+  let raf = 0, prev = performance.now(), slowFrames = 0, wasHidden = false;
   function frame(now: number) {
     raf = requestAnimationFrame(frame);
     const dt = Math.min(0.05, (now - prev) / 1000);
+    const gap = now - prev;
     prev = now;
-    if (document.hidden || !W) return;
+    if (document.hidden || !W) { wasHidden = true; return; }
+    // Gaps spanning a hidden period are not rendering cost; only consecutive slow frames count.
+    if (onTooSlow && !wasHidden) {
+      slowFrames = gap > SLOW_FRAME_MS ? slowFrames + 1 : 0;
+      if (slowFrames >= SLOW_FRAMES) { const notify = onTooSlow; onTooSlow = null; notify(); }
+    }
+    wasHidden = false;
     if (last && last.resetNonce !== nonce) { if (nonce !== null) { dAz = 0; dPol = 0; wz = 1; } nonce = last.resetNonce; }
     const az = ((last?.rot ?? 0) * Math.PI) / 180;
     const zoom = clampZ(baseZoom() * wz), asp = camera.aspect || 1.7;
