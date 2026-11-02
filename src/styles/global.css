@@ -420,6 +420,12 @@ a:hover { color: var(--tl-color-primary-hover); }
 .field-head > label { font: 600 0.8125rem/1.2 var(--tl-font-ui); }
 .field-head > span { font: 500 0.75rem/1.2 var(--tl-font-ui); color: var(--tl-color-text-subtle); text-align: right; }
 .scene-host { position: absolute; inset: 0; overflow: hidden; contain: paint; }
+.scene-box:fullscreen { display: flex; flex-direction: column; border: 0; border-radius: 0; background: var(--tl-color-canvas); }
+.scene-box:fullscreen .scene-viewport { flex: 1; max-width: none; aspect-ratio: auto; }
+.scene-keys {
+  position: absolute; left: 50%; bottom: var(--tl-space-3); transform: translateX(-50%); z-index: 2; margin: 0; padding: 6px 12px; border-radius: 0.6875rem;
+  background: rgb(255 255 255 / 85%); box-shadow: var(--tl-shadow-chip); font: 600 0.75rem/1.2 var(--tl-font-ui); color: var(--tl-color-text-muted); white-space: nowrap; pointer-events: none;
+}
 .metric-unit { font: 500 0.75rem/1 var(--tl-font-ui); letter-spacing: 0; color: var(--tl-color-text-subtle); }
 .hero .metric-unit { font-size: 0.875rem; font-weight: 600; }
 .hero .metric { padding: 0; }

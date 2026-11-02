@@ -124,7 +124,7 @@ Rasio berikut dihitung terhadap latar efektif terburuk: kaca 56% di atas bidang 
 | `--tl-scene-manual` | `#4C5FD5` | Penanda kecil di atas kepala pelanggan tambahan manual |
 | `--tl-scene-idle` | `#DDE6E1` | Loket kosong |
 
-Warna scene adalah material visual; pencahayaan dapat mengubah warna terender. Status loket memakai label DOM (L1 · Melayani/Kosong) yang mengikuti posisi loket. Nama zona besar (Dapur, Antrean, Area makan, Pintu masuk, Gudang, Wastafel, Keluar) boleh tertulis di lantai sebagai orientasi; informasi yang dibutuhkan tetap tersedia sebagai teks DOM. Pemilihan A/B tidak menyatakan pemenang. Verdict penurunan/kenaikan wait adalah status terpisah dengan teks dan CI.
+Warna scene adalah material visual; pencahayaan dapat mengubah warna terender. Status loket memakai label DOM (L1 · Melayani/Kosong) yang mengikuti posisi loket. Nama zona besar (Dapur, Antrean, Area makan, Pintu masuk, Gudang, Wastafel, Mushola, Keluar) boleh tertulis di lantai sebagai orientasi; informasi yang dibutuhkan tetap tersedia sebagai teks DOM. Pemilihan A/B tidak menyatakan pemenang. Verdict penurunan/kenaikan wait adalah status terpisah dengan teks dan CI.
 
 ### 3.5 Tipografi
 
@@ -304,7 +304,7 @@ READY netral; RUNNING info; PAUSED warning; COMPLETED success; ERROR/LIMIT_REACH
 
 ### CMP-06 — SceneViewport dan CameraControls
 
-Scene adalah denah kantin 3D representatif (three.js, dimuat lazy): dinding, dapur, 1–6 loket berlabel, satu jalur antrean bersama berpagar, pintu masuk, area makan, gudang dan wastafel. Avatar kapsul berjalan dari pintu ke antrean, ke loket, lalu ke kursi dan keluar. Bagian setelah loket (makan, keluar) dan seluruh jarak berjalan murni visual; AssumptionPanel menyatakannya secara eksplisit dan angka selalu berasal dari engine. Paling banyak 40 avatar antrean digambar; sisanya ditulis “X pelanggan diringkas”. Default seluruh loket masuk frame; seret untuk memutar, pinch/Ctrl+scroll untuk zoom (scroll biasa tetap menggulir halaman), klik ganda untuk reset.
+Scene adalah denah kantin 3D representatif (three.js, dimuat lazy): dinding, dapur, 1–6 loket berlabel, satu jalur antrean bersama berpagar, pintu masuk, area makan, gudang, wastafel dan mushola. Avatar kapsul berjalan dari pintu ke antrean, ke loket, lalu ke kursi dan keluar. Bagian setelah loket (makan, keluar) dan seluruh jarak berjalan murni visual; AssumptionPanel menyatakannya secara eksplisit dan angka selalu berasal dari engine. Paling banyak 40 avatar antrean digambar; sisanya ditulis “X pelanggan diringkas”. Default seluruh loket masuk frame; seret untuk memutar, pinch/Ctrl+scroll untuk zoom (scroll biasa tetap menggulir halaman), klik ganda untuk reset.
 
 CameraControls: pan kiri/kanan/atas/bawah, rotate kiri/kanan, zoom +/− dan Reset tampilan. Tombol keyboard-native; tidak mengambil alih arrow global. Scroll halaman tidak dipakai zoom kecuali pengguna sengaja memberi fokus/mode kontrol scene yang dijelaskan. Batas zoom/rotate mencegah scene hilang; Reset tampilan selalu memulihkan frame default tanpa mengubah simulasi.
 

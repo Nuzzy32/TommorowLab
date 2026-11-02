@@ -277,6 +277,50 @@ test('3D scene loads lazily, toggles to the compact view and back', async ({ pag
   await page.getByRole('button', { name: 'Reset tampilan' }).click();
 });
 
+test('fullscreen 3D shows the key hint and WASD moves the camera', async ({ page }) => {
+  await open(page);
+  await skipWithoutFast3d(page);
+  await expect(page.locator('.scene-canvas')).toBeVisible();
+  await page.getByRole('button', { name: 'Layar penuh' }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.className)).toBe('scene-box');
+  await expect(page.getByText('WASD atau panah untuk bergerak', { exact: false })).toBeVisible();
+  // Counter labels follow the camera, while staff animation does not move them.
+  const label = page.locator('.scene-counter-label').first();
+  await page.waitForTimeout(1500);
+  const before = await label.evaluate(el => el.style.transform);
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(600);
+  await page.keyboard.up('KeyW');
+  await expect.poll(() => label.evaluate(el => el.style.transform)).not.toBe(before);
+  await page.evaluate(() => document.exitFullscreen());
+  await expect(page.locator('.scene-keys')).toHaveCount(0);
+});
+
+test('walk mode drops into first person, W walks forward, and reset leaves it', async ({ page }) => {
+  await open(page);
+  await skipWithoutFast3d(page);
+  await expect(page.locator('.scene-canvas')).toBeVisible();
+  const sound = page.getByRole('button', { name: 'Suara' });
+  await sound.click();
+  await expect(sound).toHaveAttribute('aria-pressed', 'true');
+  const walk = page.getByRole('button', { name: 'Mode jalan' });
+  await walk.click();
+  await expect(walk).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('WASD berjalan', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Perbesar' })).toBeDisabled();
+  const label = page.locator('.scene-counter-label').first();
+  await page.locator('.scene-canvas').hover();
+  await page.waitForTimeout(500);
+  const before = await label.evaluate(el => el.style.transform);
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(600);
+  await page.keyboard.up('KeyW');
+  await expect.poll(() => label.evaluate(el => el.style.transform)).not.toBe(before);
+  await page.getByRole('button', { name: 'Reset tampilan' }).click();
+  await expect(walk).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.scene-keys')).toHaveCount(0);
+});
+
 test('a 3D view that renders too slowly falls back to the compact view; asking again keeps 3D', async ({ page }) => {
   test.skip(await page.evaluate(() => !document.createElement('canvas').getContext('webgl2')).catch(() => true), 'no WebGL2');
   // Simulate a weak device: every animation frame arrives 400 ms late.

@@ -68,9 +68,17 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
   c: number; status: RunStatus; projection: Projection | null; speed: number;
 }) {
   const [mode, setMode] = useState<SceneState>('loading');
-  const [camera, setCamera] = useState({ rot: 0, zoom: 1, resetNonce: 0 });
+  const [camera, setCamera] = useState({ rot: 0, zoom: 1, resetNonce: 0, walk: false });
   const host = useRef<HTMLDivElement>(null);
   const scene = useRef<CanteenScene | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const [full, setFull] = useState(false);
+  const [sound, setSound] = useState(false);
+  useEffect(() => {
+    const sync = () => setFull(!!box.current && document.fullscreenElement === box.current);
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
   const wants3d = mode === 'loading' || mode === 'ready';
 
   const servers = projection?.servers ?? Array.from({ length: c }, (_, ordinal) => ({ ordinal, busyCustomerId: null as string | null, departureAt: null as number | null }));
@@ -78,7 +86,7 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
   const waiting = projection?.waitingSample ?? [];
   const customer = (id: string) => ({ id, manual: id.startsWith('m:') });
   const view: SceneView = {
-    c: servers.length, live: projection !== null, runKey: projection?.runId ?? 'draft', speed, ...camera,
+    c: servers.length, live: projection !== null, runKey: projection?.runId ?? 'draft', speed, ...camera, sound,
     waiting: waiting.slice(0, SCENE_SHOWN).map(customer),
     serving: servers.map(server => (server.busyCustomerId ? customer(server.busyCustomerId) : null)),
   };
@@ -125,7 +133,7 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
           {mode !== 'unsupported' && <button type="button" className="button compact" onClick={() => { forced.current = mode === 'slow'; setMode('loading'); }}>Coba 3D lagi</button>}
         </div>
       )}
-      <div className="scene-box">
+      <div ref={box} className="scene-box">
         <dl className="count-chips counts">
           <div><dt>Tiba</dt><dd>{formatCount(counts?.arrived ?? 0)}</dd></div>
           <div><dt>Menunggu</dt><dd>{formatCount(counts?.waiting ?? 0)}</dd></div>
@@ -137,6 +145,9 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
           <div className="scene-viewport">
             <div ref={host} className="scene-host" aria-hidden="true" />
             {mode === 'loading' && <p className="scene-loading">Memuat ruang 3D…</p>}
+            {mode === 'ready' && camera.walk
+              ? <p className="scene-keys">Klik lalu gerakkan mouse untuk melihat · WASD berjalan · Shift lari · Esc lepas kursor</p>
+              : full && <p className="scene-keys">WASD atau panah untuk bergerak · Q/E memutar · Shift lebih cepat · Esc keluar</p>}
           </div>
         )}
         <div className={wants3d ? 'sr-only' : 'compact-scene'}>
@@ -175,19 +186,33 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
           <span><span className="marker serving" />Dilayani</span>
           <span><span className="marker manual" />Tambahan manual</span>
           <span><span className="marker idle" />Loket kosong</span>
-          {mode === 'ready' && <span><Icon name="grab" size={14} />Seret untuk memutar · scroll atau pinch untuk zoom · klik ganda untuk reset</span>}
+          {mode === 'ready' && <span><Icon name="grab" size={14} />Seret untuk memutar · WASD untuk bergerak · scroll atau pinch untuk zoom · klik ganda untuk reset</span>}
         </p>
         <div className="camera-controls">
           {([
-            ['Putar kiri', 'rotateLeft', camera.rot <= -45, () => setCamera({ ...camera, rot: camera.rot - 15 })],
-            ['Putar kanan', 'rotateRight', camera.rot >= 45, () => setCamera({ ...camera, rot: camera.rot + 15 })],
-            ['Perkecil', 'zoomOut', camera.zoom <= 0.7, () => setCamera({ ...camera, zoom: +(camera.zoom - 0.15).toFixed(2) })],
-            ['Perbesar', 'zoomIn', camera.zoom >= 1.6, () => setCamera({ ...camera, zoom: +(camera.zoom + 0.15).toFixed(2) })],
-            ['Reset tampilan', 'frame', false, () => setCamera({ rot: 0, zoom: 1, resetNonce: camera.resetNonce + 1 })],
+            ['Putar kiri', 'rotateLeft', camera.walk || camera.rot <= -45, () => setCamera({ ...camera, rot: camera.rot - 15 })],
+            ['Putar kanan', 'rotateRight', camera.walk || camera.rot >= 45, () => setCamera({ ...camera, rot: camera.rot + 15 })],
+            ['Perkecil', 'zoomOut', camera.walk || camera.zoom <= 0.7, () => setCamera({ ...camera, zoom: +(camera.zoom - 0.15).toFixed(2) })],
+            ['Perbesar', 'zoomIn', camera.walk || camera.zoom >= 1.6, () => setCamera({ ...camera, zoom: +(camera.zoom + 0.15).toFixed(2) })],
+            ['Reset tampilan', 'frame', false, () => setCamera({ rot: 0, zoom: 1, resetNonce: camera.resetNonce + 1, walk: false })],
           ] as const).map(([label, icon, limit, onClick]) => (
             <button key={label} type="button" className="icon-button small" aria-label={label} title={label}
               disabled={mode !== 'ready' || limit} onClick={onClick}><Icon name={icon} size={16} /></button>
           ))}
+          {typeof document !== 'undefined' && document.fullscreenEnabled && (
+            <button type="button" className="icon-button small" aria-label="Layar penuh" title="Layar penuh"
+              disabled={mode !== 'ready'} onClick={() => { box.current?.requestFullscreen().catch(() => {}); }}><Icon name="expand" size={16} /></button>
+          )}
+          {wants3d && (
+            <button type="button" className="icon-button small" aria-label="Suara" title={sound ? 'Matikan suara' : 'Nyalakan suara'} aria-pressed={sound}
+              disabled={mode !== 'ready'} onClick={() => setSound(!sound)}><Icon name={sound ? 'soundOn' : 'soundOff'} size={16} /></button>
+          )}
+          {wants3d && (
+            <button type="button" className="button compact" aria-pressed={camera.walk} disabled={mode !== 'ready'}
+              onClick={() => setCamera({ ...camera, walk: !camera.walk })}>
+              <Icon name="walk" size={15} />Mode jalan
+            </button>
+          )}
           {mode !== 'unsupported' && (
             <button type="button" className="button compact" aria-pressed={!wants3d}
               onClick={() => setMode(wants3d ? 'compact' : 'loading')}>
