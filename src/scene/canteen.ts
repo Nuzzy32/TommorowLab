@@ -22,8 +22,13 @@ export const SCENE_AVATAR_LIMIT = 40;
 type XZ = [number, number];
 type Node = { v: THREE.Vector3; face?: number; wait?: number; fn?: () => void };
 type Chair = { x: number; z: number; tz: number; s: number; aisle: number; busy: boolean };
+// Low-poly person: hips/knees/arms are pivots so legs swing and bend to sit; `shirt` meshes carry the status colour.
+type Fig = { g: THREE.Group; head: THREE.Mesh; hips: THREE.Group[]; knees: THREE.Group[]; arms: THREE.Group[]; shirt: THREE.Mesh[] };
+type Look = { shirt: THREE.Material; pants: THREE.Material; skin: THREE.Material; hair?: THREE.Material; hat?: 'chef' | 'hard'; apron?: THREE.Material };
+// Staff loop over `route`; `busy` undefined means they work only while paused at a stop.
+type Crew = { f: Fig; route: Node[]; i: number; wait: number; ph: number; busy?: boolean; seated?: boolean; tool?: THREE.Object3D; load?: THREE.Object3D };
 type Agent = {
-  g: THREE.Group; b: THREE.Mesh; h: THREE.Mesh; path: Node[]; laneEnd: number;
+  f: Fig; path: Node[]; laneEnd: number;
   stage: 'queue' | 'serve' | 'dine' | 'eat' | 'exit'; counter: number; wait: number; ph: number;
   leaving?: boolean; chair?: Chair; tray?: THREE.Group | null; food?: THREE.Mesh;
   eatT?: number; eatDur?: number; fading?: number; fade?: THREE.Material[];
@@ -125,26 +130,134 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
   wall(-10.2, -5.2, -10.2, -2.4, 1.5);
   wall(7.4, -3.2, 7.4, -0.6, 0.9, 0.18); wall(7.4, 2.6, 7.4, 6.2, 0.9, 0.18);
 
+  const dummy = new THREE.Object3D();
+  // One draw call for every copy of a prop; rows are [x, y, z, rotY?].
+  const many = (geo: THREE.BufferGeometry, mat: THREE.Material, at: number[][], cast = true) => {
+    const m = T(new THREE.InstancedMesh(T(geo), mat, at.length));
+    at.forEach(([x, y, z, ry = 0], i) => { dummy.position.set(x, y, z); dummy.rotation.set(0, ry, 0); dummy.updateMatrix(); m.setMatrixAt(i, dummy.matrix); });
+    m.castShadow = cast;
+    m.receiveShadow = true;
+    world.add(m);
+  };
+  const mats = {
+    w: M('#E9B949', { roughness: 0.6 }), s: M('#2E8B6C', { roughness: 0.6 }), tag: M('#4C5FD5', { roughness: 0.4 }),
+    plate: M('#FFFFFF', { roughness: 0.3 }), food: [M('#E39A4B'), M('#D8693E'), M('#C9B25A'), M('#9DBE6A')], cup: M('#7FB7D8', { roughness: 0.2 }),
+  };
+  const skins = ['#F1D3B5', '#E0B48F', '#C68E64', '#8D5A3B'].map(c => M(c, { roughness: 0.7 }));
+  const hairs = ['#2B2522', '#4A3426', '#1C1C1C', '#7A5636', '#B8B0A6'].map(c => M(c));
+  const pants = ['#3B4A5C', '#2F3B33', '#5C5248', '#26304A', '#6B7280'].map(c => M(c));
+  const crewM = { coat: M('#F7F7F5', { roughness: 0.7 }), slacks: M('#2F3B35'), apron: M('#3D4A45'), denim: M('#2F6FB8'), hard: M('#F2C230', { roughness: 0.4 }), teal: M('#5B8A9A') };
+  const pick = <X,>(xs: X[]) => xs[Math.floor(Math.random() * xs.length)];
+
+  const gThigh = T(new THREE.BoxGeometry(0.12, 0.25, 0.14).translate(0, -0.125, 0));
+  const gShin = T(new THREE.BoxGeometry(0.11, 0.27, 0.13).translate(0, -0.135, 0.01));
+  const gTorso = T(new THREE.CapsuleGeometry(0.15, 0.2, 4, 10).scale(1, 1, 0.66));
+  const gArm = T(new THREE.CapsuleGeometry(0.045, 0.3, 3, 8).translate(0, -0.19, 0));
+  const gSkull = T(new THREE.SphereGeometry(0.11, 16, 12)), gHair = T(new THREE.SphereGeometry(0.118, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.55));
+  const gChef = T(new THREE.CylinderGeometry(0.12, 0.1, 0.16, 14)), gHard = T(new THREE.SphereGeometry(0.135, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2));
+  const gApron = T(new THREE.BoxGeometry(0.24, 0.4, 0.02));
+  const HIP = FY + 0.52, HEAD = FY + 1.11, SEAT_DROP = -0.16;
+  function person(parent: THREE.Object3D, k: Look, x: number, z: number, ry: number): Fig {
+    const g = new THREE.Group();
+    const part = (geo: THREE.BufferGeometry, mat: THREE.Material, into: THREE.Object3D, px: number, py: number, pz: number, cast = false) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(px, py, pz);
+      m.castShadow = cast;
+      into.add(m);
+      return m;
+    };
+    const joint = (into: THREE.Object3D, px: number, py: number) => { const j = new THREE.Group(); j.position.set(px, py, 0); into.add(j); return j; };
+    const hips = [-0.08, 0.08].map(o => joint(g, o, HIP)), knees = hips.map(h => joint(h, 0, -0.25));
+    hips.forEach(h => part(gThigh, k.pants, h, 0, 0, 0));
+    knees.forEach(n => part(gShin, k.pants, n, 0, 0, 0));
+    const arms = [-0.2, 0.2].map(o => joint(g, o, FY + 0.93));
+    const shirt = [part(gTorso, k.shirt, g, 0, HIP + 0.22, 0, true), ...arms.map(a => part(gArm, k.shirt, a, 0, 0, 0))];
+    const head = part(gSkull, k.skin, g, 0, HEAD, 0, true);
+    if (k.hair) part(gHair, k.hair, head, 0, 0.012, -0.008);
+    if (k.hat === 'chef') part(gChef, crewM.coat, head, 0, 0.13, 0);
+    if (k.hat === 'hard') part(gHard, crewM.hard, head, 0, 0.02, 0);
+    if (k.apron) part(gApron, k.apron, g, 0, HIP + 0.17, 0.105);
+    g.position.set(x, 0, z);
+    g.rotation.y = ry;
+    parent.add(g);
+    return { g, head, hips, knees, arms, shirt };
+  }
+  // walk: gait phase while moving (null = standing); reach lifts both arms forward.
+  function pose(f: Fig, walk: number | null, reach = 0, seated = false) {
+    const s = walk == null || reduced ? 0 : Math.sin(walk);
+    f.hips[0].rotation.x = seated ? -1.5 : s * 0.5;
+    f.hips[1].rotation.x = seated ? -1.5 : -s * 0.5;
+    f.knees[0].rotation.x = seated ? 1.5 : Math.max(0, -s) * 0.6;
+    f.knees[1].rotation.x = seated ? 1.5 : Math.max(0, s) * 0.6;
+    f.arms[0].rotation.x = -reach - (reach ? 0 : s * 0.45);
+    f.arms[1].rotation.x = -reach + (reach ? 0 : s * 0.45);
+  }
+
   const steel = M('#D9E0DD', { roughness: 0.35, metalness: 0.35 }), dark = M('#5E6B66', { roughness: 0.5 });
-  box(world, 5.2, 0.9, 0.8, steel, -3.6, FY + 0.45, -8.35);
-  box(world, 5.2, 0.9, 0.8, steel, 3.6, FY + 0.45, -8.35);
-  [-5.4, -3.6, -1.8].forEach(x => box(world, 0.9, 0.04, 0.6, dark, x, FY + 0.92, -8.35));
+  const wood = M('#EFE6D8'), seatM = M('#8FB3A4'), crate = M('#C9A26B'), pallet = M('#B08A5A'), leaf = M('#5E9B6A', { roughness: 0.9 }), potM = M('#D9CBB5');
+  box(world, 5.2, 0.7, 0.8, steel, -3.6, FY + 0.35, -8.35);
+  box(world, 5.2, 0.7, 0.8, steel, 3.6, FY + 0.35, -8.35);
+  [-5.4, -3.6, -1.8].forEach(x => box(world, 0.9, 0.04, 0.6, dark, x, FY + 0.72, -8.35));
   box(world, 1.0, 1.9, 0.8, M('#E6ECEA', { roughness: 0.4 }), -6.4, FY + 0.95, -6.9);
   box(world, 1.0, 1.9, 0.8, M('#E6ECEA', { roughness: 0.4 }), 6.4, FY + 0.95, -6.9);
-  box(world, 4.2, 0.9, 0.7, steel, 0, FY + 0.45, -7.0);
+  box(world, 4.2, 0.7, 0.7, steel, 0, FY + 0.35, -7.0);
   for (let i = 0; i < 3; i++) box(world, 0.9, 0.9, 0.6, M('#DCE4F2'), -13.3, FY + 0.45, -8.4 + i * 1.1);
   box(world, 0.6, 0.85, 3.2, M('#E4EBE8'), -13.5, FY + 0.43, -0.4);
+  // Kitchen: pots and a wok on the burners, a prep board, plate stacks and filled pans on the island.
+  many(new THREE.CylinderGeometry(0.17, 0.15, 0.18, 16), dark, [[-5.4, FY + 0.83, -8.35], [-1.8, FY + 0.83, -8.35]]);
+  many(new THREE.CylinderGeometry(0.24, 0.1, 0.1, 16), M('#2F3533', { roughness: 0.4, metalness: 0.4 }), [[-3.6, FY + 0.79, -8.35]]);
+  box(world, 0.55, 0.03, 0.34, M('#D7B98C'), 3.0, FY + 0.715, -8.35, false);
+  many(new THREE.SphereGeometry(0.06, 10, 8), mats.food[3], [[2.85, FY + 0.77, -8.4], [2.97, FY + 0.77, -8.3], [3.1, FY + 0.77, -8.42]], false);
+  many(new THREE.CylinderGeometry(0.17, 0.17, 0.16, 18), mats.plate, [[4.9, FY + 0.78, -8.35], [5.4, FY + 0.78, -8.35]]);
+  [-1.2, 0, 1.2].forEach((x, i) => box(world, 0.6, 0.07, 0.4, mats.food[i], x, FY + 0.74, -7.0, false));
 
-  const wood = M('#EFE6D8'), seatM = M('#8FB3A4');
   const chairs: Chair[] = [], AISLE = [-3.65, -0.75, 2.55, 5.6, 8.45];
+  const seats: number[][] = [], backs: number[][] = [], stems: number[][] = [], tops: number[][] = [], tlegs: number[][] = [], vases: number[][] = [];
+  const chairAt = (x: number, z: number, s: number) => { seats.push([x, FY + 0.315, z]); backs.push([x, FY + 0.55, z + s * 0.2]); stems.push([x, FY + 0.15, z]); };
   [9.3, 12.3].forEach(tx => [-2.4, 0.9, 4.2, 7.0].forEach((tz, r) => {
-    box(world, 1.9, 0.08, 1.0, wood, tx, FY + 0.76, tz);
-    box(world, 0.12, 0.72, 0.12, dark, tx, FY + 0.36, tz, false);
+    tops.push([tx, FY + 0.59, tz]);
+    tlegs.push([tx - 0.75, FY + 0.28, tz], [tx + 0.75, FY + 0.28, tz]);
+    vases.push([tx, FY + 0.68, tz]);
     [-0.5, 0.5].forEach(o => [-1, 1].forEach(s => {
-      box(world, 0.44, 0.44, 0.44, seatM, tx + o, FY + 0.22, tz + s * 0.8);
+      chairAt(tx + o, tz + s * 0.8, s);
       chairs.push({ x: tx + o, z: tz + s * 0.76, tz, s, aisle: s < 0 ? AISLE[r] : AISLE[r + 1], busy: false });
     }));
   }));
+  // Staff room: lockers, a vending machine and a small table where one worker takes a break.
+  many(new THREE.BoxGeometry(0.6, 1.5, 0.45), M('#9DB4C0', { roughness: 0.5, metalness: 0.2 }), [8.1, 8.75, 9.4, 10.05].map(x => [x, FY + 0.75, -8.55]));
+  box(world, 0.8, 1.7, 0.6, M('#C9463D', { roughness: 0.4 }), 13.35, FY + 0.85, -8.45);
+  box(world, 0.6, 1.0, 0.02, M('#DDEFF5', { emissive: '#7FB7D8', emissiveIntensity: 0.25 }), 13.35, FY + 1.0, -8.14, false);
+  many(new THREE.CylinderGeometry(0.45, 0.45, 0.05, 24), wood, [[11.6, FY + 0.6, -6.7]]);
+  many(new THREE.CylinderGeometry(0.05, 0.12, 0.58, 12), dark, [[11.6, FY + 0.29, -6.7]], false);
+  chairAt(11.6, -7.35, -1);
+  chairAt(11.6, -6.05, 1);
+  many(new THREE.BoxGeometry(0.42, 0.05, 0.42), seatM, seats);
+  many(new THREE.BoxGeometry(0.42, 0.42, 0.05), seatM, backs);
+  many(new THREE.BoxGeometry(0.06, 0.3, 0.06), dark, stems, false);
+  many(new THREE.BoxGeometry(1.9, 0.06, 1.0), wood, tops);
+  many(new THREE.BoxGeometry(0.06, 0.56, 0.6), dark, tlegs, false);
+  many(new THREE.CylinderGeometry(0.045, 0.04, 0.12, 10), mats.plate, vases, false);
+  many(new THREE.SphereGeometry(0.06, 8, 6), leaf, vases.map(([x, y, z]) => [x, y + 0.09, z]), false);
+  many(new THREE.CylinderGeometry(0.05, 0.045, 0.12, 12), mats.cup, [[11.45, FY + 0.69, -6.85]], false);
+  // Store room: pallets stacked with crates. Wash area: sinks with mirrors.
+  const stacks: number[][] = [];
+  [-8.0, -6.6].forEach((z, p) => [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]].forEach(([dx, dz], i) => {
+    for (let lv = 0; lv < (i === 3 && p ? 1 : 2); lv++) stacks.push([-11.5 + dx, FY + 0.3 + lv * 0.38, z + dz, (i + lv) * 0.08]);
+  }));
+  many(new THREE.BoxGeometry(0.95, 0.12, 0.95), pallet, [[-11.5, FY + 0.06, -8.0], [-11.5, FY + 0.06, -6.6]]);
+  many(new THREE.BoxGeometry(0.4, 0.36, 0.4), crate, stacks);
+  const sinks = [4.6, 5.9, 7.2];
+  many(new THREE.BoxGeometry(0.55, 0.8, 0.9), M('#F4F6F5', { roughness: 0.4 }), sinks.map(z => [-13.55, FY + 0.4, z]));
+  many(new THREE.BoxGeometry(0.36, 0.03, 0.5), M('#B9C6BF', { roughness: 0.2, metalness: 0.3 }), sinks.map(z => [-13.5, FY + 0.81, z]), false);
+  many(new THREE.BoxGeometry(0.03, 0.45, 0.6), M('#DDEFF5', { roughness: 0.05, metalness: 0.5 }), sinks.map(z => [-13.84, FY + 1.15, z]), false);
+  // Plants, bins, a drinks fridge and a menu board around the room.
+  const plants = [[-7.0, 8.5], [-1.95, 8.5], [7.75, -4.6], [6.6, 7.6], [-9.6, 3.0], [13.45, 5.6]];
+  many(new THREE.CylinderGeometry(0.2, 0.15, 0.35, 14), potM, plants.map(([x, z]) => [x, FY + 0.175, z]));
+  many(new THREE.IcosahedronGeometry(0.34, 0), leaf, plants.map(([x, z], i) => [x, FY + 0.6, z, i]));
+  many(new THREE.CylinderGeometry(0.18, 0.16, 0.5, 14), M('#3F6B57'), [[13.45, FY + 0.25, 8.5], [13.45, FY + 0.25, -3.5]]);
+  box(world, 0.6, 1.6, 0.6, M('#E6ECEA', { roughness: 0.4 }), 13.5, FY + 0.8, 2.55);
+  box(world, 0.02, 1.25, 0.48, M('#BFE3F2', { emissive: '#5FA8C8', emissiveIntensity: 0.35 }), 13.19, FY + 0.88, 2.55, false);
+  box(world, 0.5, 0.7, 0.06, M('#2F3B35'), -2.0, FY + 0.45, 7.3).rotation.y = 0.5;
 
   const postM = M('#6E7C76', { roughness: 0.4, metalness: 0.4 }), beltM = M('#C8961E', { roughness: 0.6 });
   const gPost = T(new THREE.CylinderGeometry(0.045, 0.06, 0.9, 10));
@@ -224,6 +337,38 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
   const ringGeo = T(new THREE.RingGeometry(0.32, 0.4, 32));
   const ringMat = T(new THREE.MeshBasicMaterial({ color: '#2E8B6C', transparent: true, opacity: 0.35 }));
   const counterTrash: { dispose(): void }[] = [];
+  const N = (p: XZ, o: Omit<Node, 'v'> = {}): Node => ({ v: new THREE.Vector3(p[0], 0, p[1]), ...o });
+  const kitchen = (): Look => ({ shirt: crewM.coat, pants: crewM.slacks, skin: pick(skins), hat: 'chef', apron: crewM.apron });
+  const staff = (k: Look, route: Node[], extra: Partial<Crew> = {}, parent: THREE.Object3D = world): Crew => {
+    const { x, z } = route[0].v;
+    return { f: person(parent, k, x, z, route[0].face ?? 0), route, i: 0, wait: 0, ph: Math.random() * 6, ...extra };
+  };
+  let servers: Crew[] = [];
+  const crew: Crew[] = [
+    staff(kitchen(), [N([-3.6, -7.7], { face: Math.PI, wait: Infinity })], { busy: true }),
+    staff(kitchen(), [N([3.0, -7.7], { face: Math.PI, wait: Infinity })], { busy: true }),
+    staff(kitchen(), [N([0, -7.66], { face: 0, wait: Infinity })], { busy: true }),
+    staff({ shirt: crewM.coat, pants: pick(pants), skin: pick(skins), hair: pick(hairs) }, [N([11.6, -7.35], { face: 0, wait: Infinity })], { busy: false, seated: true }),
+  ];
+  {
+    // Store hand: picks a crate off the shelves, carries it to the kitchen fridge, comes back.
+    const lane = N([-12.4, -5.6]), door = N([-6.8, -5.6]);
+    const w = staff({ shirt: crewM.coat, pants: crewM.denim, apron: crewM.denim, skin: pick(skins), hat: 'hard' }, [
+      N([-12.4, -7.3], { face: -Math.PI / 2, wait: 3 }), N([-12.4, -7.3], { fn: () => { w.load!.visible = true; } }), lane, door,
+      N([-6.55, -6.3], { face: Math.PI, wait: 2.5, fn: () => { w.load!.visible = false; } }), door, lane,
+    ]);
+    w.load = box(w.f.g, 0.36, 0.3, 0.3, crate, 0, FY + 0.78, 0.32);
+    w.load.visible = false;
+    // Cleaner mops the dining corridor in stops.
+    const c = staff({ shirt: crewM.teal, pants: crewM.slacks, skin: pick(skins), hair: pick(hairs) },
+      [N([10.8, -3.0], { wait: 4 }), N([10.8, 2.55], { wait: 4 }), N([10.8, 8.0], { wait: 4 }), N([10.8, 2.55], { wait: 3 })]);
+    c.tool = new THREE.Group();
+    c.tool.position.set(0.1, FY, 0.42);
+    box(c.tool, 0.03, 0.95, 0.03, dark, 0, 0.45, -0.15, false).rotation.x = -0.35;
+    box(c.tool, 0.36, 0.05, 0.14, crewM.teal, 0, 0.03, 0, false);
+    c.f.g.add(c.tool);
+    crew.push(w, c);
+  }
   function buildCounters(c: number) {
     counterTrash.splice(0).forEach(x => x.dispose());
     world.remove(counters);
@@ -244,13 +389,16 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
       return m;
     };
     const top = own(new THREE.MeshStandardMaterial({ color: '#FFFFFF', roughness: 0.3 }));
+    servers = xs.map(x => staff(kitchen(), [N([x, -6.2], { face: 0, wait: Infinity })], { busy: false }, counters));
     xs.forEach((x, i) => {
       const body = own(new THREE.MeshStandardMaterial({ color: '#F3F6F4', roughness: 0.6 }));
       const strip = own(new THREE.MeshStandardMaterial({ color: '#B9C6BF', emissive: '#000000', roughness: 0.4 }));
-      cbox(cw, 1.0, 0.9, body, x, FY + 0.5, -5.45);
-      cbox(cw + 0.12, 0.07, 1.05, top, x, FY + 1.03, -5.45);
-      cbox(cw * 0.92, 0.07, 0.05, strip, x, FY + 0.88, -4.98, false);
-      cbox(cw, 0.5, 0.04, glass, x, FY + 1.33, -5.75, false).renderOrder = 6;
+      cbox(cw, 0.75, 0.9, body, x, FY + 0.375, -5.45);
+      cbox(cw + 0.12, 0.07, 1.05, top, x, FY + 0.78, -5.45);
+      cbox(cw * 0.92, 0.07, 0.05, strip, x, FY + 0.64, -4.98, false);
+      cbox(cw, 0.45, 0.04, glass, x, FY + 1.04, -5.75, false).renderOrder = 6;
+      [-1, 0, 1].forEach(k => cbox(cw * 0.26, 0.06, 0.3, mats.food[(i + k + 1) % 4], x + k * cw * 0.3, FY + 0.85, -5.55, false));
+      cbox(0.22, 0.14, 0.18, dark, x + cw / 2 - 0.18, FY + 0.89, -5.12);
       const pad = new THREE.Mesh(ringGeo, ringMat);
       pad.rotation.x = -Math.PI / 2;
       pad.position.set(x, FY + 0.01, -4.35);
@@ -265,33 +413,21 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
       st.className = 'scene-counter-status';
       el.append(dot, name, st);
       overlay.appendChild(el);
-      cLabels.push({ el, st, dot, body, strip, p: new THREE.Vector3(x, FY + 1.75, -5.5) });
+      cLabels.push({ el, st, dot, body, strip, p: new THREE.Vector3(x, FY + 2.3, -6.2) });
     });
   }
 
-  const gBody = T(new THREE.CapsuleGeometry(0.2, 0.5, 4, 12)), gHead = T(new THREE.SphereGeometry(0.16, 16, 12)), gTag = T(new THREE.SphereGeometry(0.075, 10, 8));
+  const gTag = T(new THREE.SphereGeometry(0.075, 10, 8));
   const gPlate = T(new THREE.CylinderGeometry(0.2, 0.17, 0.03, 20)), gFood = T(new THREE.SphereGeometry(0.12, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2)), gCup = T(new THREE.CylinderGeometry(0.05, 0.045, 0.13, 12));
-  const mats = {
-    w: M('#E9B949', { roughness: 0.6 }), s: M('#2E8B6C', { roughness: 0.6 }), head: M('#F4E6D4', { roughness: 0.7 }), tag: M('#4C5FD5', { roughness: 0.4 }),
-    plate: M('#FFFFFF', { roughness: 0.3 }), food: [M('#E39A4B'), M('#D8693E'), M('#C9B25A'), M('#9DBE6A')], cup: M('#7FB7D8', { roughness: 0.2 }),
-  };
   const agents = new Map<string, Agent>();
-  const N = (p: XZ, o: Omit<Node, 'v'> = {}): Node => ({ v: new THREE.Vector3(p[0], 0, p[1]), ...o });
   const ENTRY: XZ = [-4.55, 4.45];
   let runKey: string | null = null, speedMul = 1;
 
   function spawn(u: SceneCustomer) {
-    const g = new THREE.Group(), b = new THREE.Mesh(gBody, mats.w), h = new THREE.Mesh(gHead, mats.head);
-    b.position.y = FY + 0.46;
-    h.position.y = FY + 1.08;
-    b.castShadow = h.castShadow = true;
-    g.add(b, h);
-    if (u.manual) { const t = new THREE.Mesh(gTag, mats.tag); t.position.y = FY + 1.36; g.add(t); }
     const j = (Math.random() - 0.5) * 1.6;
-    g.position.set(-4.5 + j, 0, D2 + 1.4);
-    g.rotation.y = Math.PI;
-    world.add(g);
-    const a: Agent = { g, b, h, path: [N([-4.5 + j * 0.6, 6.6]), N(ENTRY)], laneEnd: SCENE_AVATAR_LIMIT, stage: 'queue', counter: 0, wait: 0, ph: Math.random() * 6 };
+    const f = person(world, { shirt: mats.w, pants: pick(pants), skin: pick(skins), hair: pick(hairs) }, -4.5 + j, D2 + 1.4, Math.PI);
+    if (u.manual) { const t = new THREE.Mesh(gTag, mats.tag); t.position.y = FY + 1.36; f.g.add(t); }
+    const a: Agent = { f, path: [N([-4.5 + j * 0.6, 6.6]), N(ENTRY)], laneEnd: SCENE_AVATAR_LIMIT, stage: 'queue', counter: 0, wait: 0, ph: Math.random() * 6 };
     agents.set(u.id, a);
     return a;
   }
@@ -302,7 +438,7 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
     a.laneEnd = -1;
     a.stage = 'serve';
     a.counter = i;
-    a.b.material = mats.s;
+    a.f.shirt.forEach(m => { m.material = mats.s; });
   }
   function exitPath(a: Agent, fromAisle: number | null) {
     const p = fromAisle != null && a.chair ? [N([a.chair.x, fromAisle]), N([10.8, fromAisle])] : [N([10.8, -3.65])];
@@ -313,7 +449,7 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
     a.leaving = true;
     if (a.laneEnd >= 0) toCounter(a, 0);
     const cx = xs[a.counter] ?? 0;
-    a.path.push(N([cx, -4.35], { wait: 0.6, face: Math.PI, fn: () => { a.stage = 'dine'; } }));
+    a.path.push(N([cx, -4.35], { wait: 0.6, face: Math.PI, fn: () => { a.stage = 'dine'; takeTray(a); } }));
     a.path.push(N([cx, -3.4]), N([6.7, -3.65]), N([7.9, -3.65]));
     const free = chairs.filter(c => !c.busy);
     if (!free.length) { a.path.push(...exitPath(a, null)); return; }
@@ -322,33 +458,39 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
     a.chair = ch;
     a.path.push(N([7.9, ch.aisle]), N([ch.x, ch.aisle]), N([ch.x, ch.z], { face: ch.s < 0 ? 0 : Math.PI, fn: () => sit(a) }));
   }
-  function sit(a: Agent) {
-    const ch = a.chair!;
-    a.stage = 'eat';
-    a.eatT = 0;
-    a.eatDur = (9 + Math.random() * 7) * speedMul;
-    const tr = new THREE.Group(), pl = new THREE.Mesh(gPlate, mats.plate), fd = new THREE.Mesh(gFood, mats.food[Math.floor(Math.random() * 4)]), cu = new THREE.Mesh(gCup, mats.cup);
+  // The meal is carried from the counter in both hands, then set down on the table at `sit`.
+  function takeTray(a: Agent) {
+    const tr = new THREE.Group(), pl = new THREE.Mesh(gPlate, mats.plate), fd = new THREE.Mesh(gFood, pick(mats.food)), cu = new THREE.Mesh(gCup, mats.cup);
     pl.position.y = 0.015;
     fd.position.y = 0.03;
     cu.position.set(0.24, 0.065, 0);
     pl.castShadow = cu.castShadow = true;
     tr.add(pl, fd, cu);
-    tr.position.set(ch.x, FY + 0.8, ch.tz + ch.s * 0.26);
-    world.add(tr);
+    tr.position.set(0, FY + 0.78, 0.34);
+    a.f.g.add(tr);
     a.tray = tr;
     a.food = fd;
+    return tr;
+  }
+  function sit(a: Agent) {
+    const ch = a.chair!;
+    a.stage = 'eat';
+    a.eatT = 0;
+    a.eatDur = (9 + Math.random() * 7) * speedMul;
+    const tr = a.tray ?? takeTray(a);
+    world.add(tr);
+    tr.position.set(ch.x, FY + 0.62, ch.tz + ch.s * 0.26);
   }
   function stand(a: Agent) {
     a.stage = 'exit';
-    a.h.position.y = FY + 1.08;
-    a.b.rotation.x = 0;
+    a.f.head.position.y = HEAD;
     if (a.tray) { world.remove(a.tray); a.tray = null; }
     const aisle = a.chair!.aisle;
     a.chair!.busy = false;
     a.path = exitPath(a, aisle);
   }
   function remove(id: string, a: Agent) {
-    world.remove(a.g);
+    world.remove(a.f.g);
     if (a.tray) world.remove(a.tray);
     if (a.chair && a.stage !== 'exit') a.chair.busy = false;
     a.fade?.forEach(m => m.dispose());
@@ -365,6 +507,7 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
       const L = cLabels[i];
       if (!L) return;
       const busy = !!u;
+      if (servers[i]) servers[i].busy = busy;
       L.st.textContent = busy ? 'Melayani' : 'Kosong';
       L.el.dataset.busy = String(busy);
       L.st.hidden = C > 3;
@@ -442,6 +585,33 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
   const tgt = new THREE.Vector3(0.4, 0, 1.4), tmp = new THREE.Vector3();
   let raf = 0, prev = performance.now(), wasHidden = false;
   const gaps: boolean[] = [];
+  // Moves g toward v by up to `step`, turning to face the way; true once it arrives.
+  function stepTo(g: THREE.Object3D, v: THREE.Vector3, step: number, dt: number) {
+    tmp.subVectors(v, g.position);
+    tmp.y = 0;
+    if (tmp.length() <= step) { g.position.x = v.x; g.position.z = v.z; return true; }
+    g.position.addScaledVector(tmp.normalize(), step);
+    let d = Math.atan2(tmp.x, tmp.z) - g.rotation.y;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    g.rotation.y += d * Math.min(1, dt * 12);
+    return false;
+  }
+  function tick(w: Crew, dt: number) {
+    const q = w.route[w.i];
+    let walk: number | null = null;
+    if (w.wait > 0) w.wait -= dt;
+    else if (stepTo(w.f.g, q.v, reduced ? 1e4 : 1.2 * dt, dt)) {
+      if (q.face != null) w.f.g.rotation.y = q.face;
+      w.wait = q.wait ?? 0;
+      q.fn?.();
+      w.i = (w.i + 1) % w.route.length;
+    } else walk = w.ph += dt * 9;
+    if (walk == null) w.ph += dt * 5;
+    const working = w.busy ?? w.wait > 0, wob = reduced ? 0 : Math.sin(w.ph);
+    pose(w.f, walk, w.load?.visible ? 1.25 : working ? 0.85 + wob * 0.2 : 0, w.seated);
+    if (w.tool) w.tool.rotation.y = working ? wob * 0.5 : 0;
+    w.f.g.position.y = w.seated ? SEAT_DROP : walk == null || reduced ? 0 : Math.abs(Math.sin(walk)) * 0.03;
+  }
   function frame(now: number) {
     raf = requestAnimationFrame(frame);
     const dt = Math.min(0.05, (now - prev) / 1000);
@@ -466,14 +636,19 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
     camera.position.set(tgt.x + cur.r * Math.sin(cur.pol) * Math.sin(cur.az), cur.r * Math.cos(cur.pol), tgt.z + cur.r * Math.sin(cur.pol) * Math.cos(cur.az));
     camera.lookAt(tgt);
     agents.forEach((a, id) => {
-      const p = a.g.position;
+      const p = a.f.g.position;
       if (a.fading != null) {
         a.fading += dt;
         if (!a.fade) {
-          a.fade = [(a.b.material as THREE.Material).clone(), mats.head.clone()];
-          a.fade.forEach(m => { m.transparent = true; });
-          a.b.material = a.fade[0];
-          a.h.material = a.fade[1];
+          const copies = new Map<THREE.Material, THREE.Material>();
+          a.f.g.traverse(o => {
+            if (!(o instanceof THREE.Mesh)) return;
+            const src = o.material as THREE.Material;
+            let c = copies.get(src);
+            if (!c) { c = src.clone(); c.transparent = true; copies.set(src, c); }
+            o.material = c;
+          });
+          a.fade = [...copies.values()];
         }
         const o = Math.max(0, 1 - a.fading / 0.6);
         a.fade.forEach(m => { m.opacity = o; });
@@ -483,40 +658,33 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
         a.eatT! += dt;
         const e = Math.min(1, a.eatT! / a.eatDur!);
         if (a.food) { const sc = 1 - e * 0.85; a.food.scale.set(sc, sc, sc); }
-        const nod = reduced ? 0 : Math.max(0, Math.sin(a.eatT! * 3.2 + a.ph)) * 0.16;
-        a.b.rotation.x = nod;
-        a.h.position.y = FY + 1.08 - nod * 0.12;
-        p.y = -0.24;
+        const nod = reduced ? 0 : Math.max(0, Math.sin(a.eatT! * 3.2 + a.ph));
+        pose(a.f, null, 0, true);
+        a.f.arms[1].rotation.x = -0.9 - nod * 0.8;
+        a.f.head.position.y = HEAD - nod * 0.03;
+        p.y = SEAT_DROP;
         if (e >= 1) stand(a);
         return;
       }
-      if (a.wait > 0) { a.wait -= dt; p.y = 0; return; }
-      if (!a.path.length) { p.y = 0; return; }
-      const q = a.path[0];
-      tmp.subVectors(q.v, p);
-      tmp.y = 0;
-      const dist = tmp.length();
-      let rem = dist;
-      for (let i = 1; i < a.path.length; i++) rem += a.path[i - 1].v.distanceTo(a.path[i].v);
-      const sp = reduced ? 1e4 : a.stage === 'dine' || a.stage === 'exit' ? 2.4 : Math.max(2.4, rem / (a.stage === 'serve' ? 2.2 : 3.2));
-      const step = sp * dt;
-      if (dist <= step) {
-        p.x = q.v.x;
-        p.z = q.v.z;
-        a.path.shift();
-        if (q.face != null) a.g.rotation.y = q.face;
-        if (q.wait) a.wait = q.wait;
-        q.fn?.();
-      } else {
-        p.addScaledVector(tmp.normalize(), step);
-        const ty = Math.atan2(tmp.x, tmp.z);
-        let d = ty - a.g.rotation.y;
-        d = Math.atan2(Math.sin(d), Math.cos(d));
-        a.g.rotation.y += d * Math.min(1, dt * 12);
+      let walk: number | null = null;
+      if (a.wait > 0) a.wait -= dt;
+      else if (a.path.length) {
+        const q = a.path[0];
+        let rem = Math.hypot(q.v.x - p.x, q.v.z - p.z);
+        for (let i = 1; i < a.path.length; i++) rem += a.path[i - 1].v.distanceTo(a.path[i].v);
+        const sp = reduced ? 1e4 : a.stage === 'dine' || a.stage === 'exit' ? 2.4 : Math.max(2.4, rem / (a.stage === 'serve' ? 2.2 : 3.2));
+        if (stepTo(a.f.g, q.v, sp * dt, dt)) {
+          a.path.shift();
+          if (q.face != null) a.f.g.rotation.y = q.face;
+          if (q.wait) a.wait = q.wait;
+          q.fn?.();
+        } else walk = a.ph += dt * 13;
       }
-      a.ph += dt * 13;
-      p.y = reduced ? 0 : Math.abs(Math.sin(a.ph)) * 0.045;
+      p.y = walk == null || reduced ? 0 : Math.abs(Math.sin(walk)) * 0.03;
+      pose(a.f, walk, a.tray ? 1.25 : 0);
     });
+    crew.forEach(w => tick(w, dt));
+    servers.forEach(w => tick(w, dt));
     const boxes = cLabels.map(L => {
       tmp.copy(L.p).project(camera);
       const w = L.el.offsetWidth || 60, h = L.el.offsetHeight || 22;
