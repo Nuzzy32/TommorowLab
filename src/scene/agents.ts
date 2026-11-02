@@ -5,8 +5,9 @@ import type { Audio } from './audio';
 import type { People } from './people';
 import type { Stage } from './stage';
 
-type Agent = {
-  f: Fig; path: Node[]; laneEnd: number;
+// Read-only to other modules (overlays look up who is where); only this module moves or removes agents.
+export type Agent = {
+  u: SceneCustomer; f: Fig; path: Node[]; laneEnd: number;
   stage: 'queue' | 'serve' | 'dine' | 'eat' | 'exit'; counter: number; wait: number; ph: number;
   leaving?: boolean; chair?: Chair; tray?: THREE.Group | null; food?: THREE.Mesh;
   eatT?: number; eatDur?: number; fading?: number; fade?: THREE.Material[];
@@ -26,7 +27,7 @@ export function createAgents({ reduced, world, T }: Stage, { person, customerLoo
     const f = person(world, customerLook(), -4.5 + j, D2 + 1.4, Math.PI);
     f.g.scale.set(0.92 + Math.random() * 0.18, 0.94 + Math.random() * 0.12, 0.92 + Math.random() * 0.18);
     if (u.manual) { const t = new THREE.Mesh(gTag, mats.tag); t.position.y = FY + 1.36; f.g.add(t); }
-    const a: Agent = { f, path: [N([-4.5 + j * 0.6, 6.6]), N(ENTRY)], laneEnd: SCENE_AVATAR_LIMIT, stage: 'queue', counter: 0, wait: 0, ph: Math.random() * 6 };
+    const a: Agent = { u, f, path: [N([-4.5 + j * 0.6, 6.6]), N(ENTRY)], laneEnd: SCENE_AVATAR_LIMIT, stage: 'queue', counter: 0, wait: 0, ph: Math.random() * 6 };
     agents.set(u.id, a);
     return a;
   }
@@ -159,6 +160,7 @@ export function createAgents({ reduced, world, T }: Stage, { person, customerLoo
 
   return {
     chairs,
+    list: agents as ReadonlyMap<string, Agent>,
     setCounters(c: number) { clearAll(); xs = counterXs(c)[0]; },
     sync(view: View) {
       speedMul = view.speed === 1 ? 2.4 : view.speed === 5 ? 1.4 : 1;
@@ -167,6 +169,7 @@ export function createAgents({ reduced, world, T }: Stage, { person, customerLoo
       const want = wanted(view.waiting, view.serving);
       want.forEach((w, id) => {
         const a = agents.get(id) ?? spawn(w.u);
+        a.u = w.u;
         if (a.leaving) return;
         if (w.st === 'w') {
           if (w.k < a.laneEnd) { for (let j = a.laneEnd - 1; j >= w.k; j--) a.path.push(N(SLOT(j))); a.laneEnd = w.k; }
