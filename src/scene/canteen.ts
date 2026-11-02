@@ -392,11 +392,10 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
   const ptr = { on: false, x: 0, y: 0 }, touches = new Map<number, XZ>();
   const clampZ = (z: number) => Math.max(0.55, Math.min(2.6, z));
   const baseZoom = () => last?.zoom || 1;
-  // Plain wheel keeps scrolling the page; pinch (ctrlKey on trackpads) or ctrl+wheel zooms.
+  // Wheel / two-finger scroll over the scene zooms; pinch (ctrlKey on trackpads) sends small deltas, so it gets a bigger k.
   cvs.addEventListener('wheel', e => {
-    if (!e.ctrlKey) return;
     e.preventDefault();
-    const k = 0.012;
+    const k = e.ctrlKey ? 0.012 : 0.0025;
     const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
     wz = clampZ(baseZoom() * wz * Math.exp(-dy * k)) / baseZoom();
   }, { passive: false });

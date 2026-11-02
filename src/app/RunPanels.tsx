@@ -175,7 +175,7 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
           <span><span className="marker serving" />Dilayani</span>
           <span><span className="marker manual" />Tambahan manual</span>
           <span><span className="marker idle" />Loket kosong</span>
-          {mode === 'ready' && <span><Icon name="grab" size={14} />Seret untuk memutar · pinch atau Ctrl+scroll untuk zoom · klik ganda untuk reset</span>}
+          {mode === 'ready' && <span><Icon name="grab" size={14} />Seret untuk memutar · scroll atau pinch untuk zoom · klik ganda untuk reset</span>}
         </p>
         <div className="camera-controls">
           {([
