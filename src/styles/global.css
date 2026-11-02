@@ -305,6 +305,21 @@ a:hover { color: var(--tl-color-primary-hover); }
 .scene-counter-dot { width: 7px; height: 7px; border-radius: 50%; background: #b9c6bf; }
 .scene-counter-label[data-busy="true"] .scene-counter-dot { background: var(--tl-scene-serving); }
 .scene-counter-label[data-busy="true"] .scene-counter-status { color: var(--tl-color-success-text); }
+/* Scene data: wait chips (fixed size, see CHIP_W/CHIP_H in insight.ts) and the walk-mode look-at card. */
+.scene-insight { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.scene-wait-chip {
+  position: absolute; left: 0; top: 0; width: 46px; height: 18px; display: grid; place-items: center; border-radius: 999px; will-change: transform;
+  font: 600 0.6875rem/1 var(--tl-font-mono); font-variant-numeric: tabular-nums; box-shadow: var(--tl-shadow-chip);
+  color: var(--tl-color-success-text); background: var(--tl-color-success-bg); border: 1px solid rgb(255 255 255 / 85%);
+}
+.scene-wait-chip[data-tone="warn"] { color: var(--tl-color-warning-text); background: var(--tl-color-warning-bg); }
+.scene-wait-chip[data-tone="long"] { color: var(--tl-color-text-inverse); background: var(--tl-color-danger-strong); }
+.scene-look-card {
+  position: absolute; left: 0; top: 0; display: grid; gap: 3px; padding: 8px 11px; border-radius: 0.75rem; white-space: nowrap; will-change: transform;
+  background: rgb(255 255 255 / 92%); border: 1px solid #fff; box-shadow: var(--tl-shadow-chip); font: 500 0.75rem/1.2 var(--tl-font-ui); color: var(--tl-color-text-muted);
+}
+.scene-look-card b { font-size: 0.8125rem; color: var(--tl-color-text); }
+.scene-look-card span:empty { display: none; }
 
 .compact-scene { padding: var(--tl-space-3) var(--tl-space-4) 1.125rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr)); gap: 0.625rem; }
 .counters { display: contents; list-style: none; }

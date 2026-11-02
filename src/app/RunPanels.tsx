@@ -74,6 +74,7 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
   const box = useRef<HTMLDivElement>(null);
   const [full, setFull] = useState(false);
   const [sound, setSound] = useState(false);
+  const [insight, setInsight] = useState(true);
   useEffect(() => {
     const sync = () => setFull(!!box.current && document.fullscreenElement === box.current);
     document.addEventListener('fullscreenchange', sync);
@@ -86,7 +87,7 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
   const waiting = projection?.waitingSample ?? [];
   const customer = (id: string, arrivedAt?: number) => ({ id, manual: id.startsWith('m:'), arrivedAt });
   const view: SceneView = {
-    c: servers.length, live: projection !== null, runKey: projection?.runId ?? 'draft', speed, ...camera, sound,
+    c: servers.length, live: projection !== null, runKey: projection?.runId ?? 'draft', speed, ...camera, sound, insight,
     clock: projection?.simTimeSec ?? 0, horizon: projection?.configSnapshot.horizonSec ?? 0,
     waiting: waiting.slice(0, SCENE_SHOWN).map((id, k) => customer(id, projection?.waitingArrivedAt[k])),
     serving: servers.map(server => (server.busyCustomerId ? customer(server.busyCustomerId) : null)),
@@ -207,6 +208,12 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
           {wants3d && (
             <button type="button" className="icon-button small" aria-label="Suara" title={sound ? 'Matikan suara' : 'Nyalakan suara'} aria-pressed={sound}
               disabled={mode !== 'ready'} onClick={() => setSound(!sound)}><Icon name={sound ? 'soundOn' : 'soundOff'} size={16} /></button>
+          )}
+          {wants3d && (
+            <button type="button" className="button compact" aria-pressed={insight} disabled={mode !== 'ready'}
+              title="Lama menunggu di atas kepala, jejak antrean di lantai, info saat melihat seseorang" onClick={() => setInsight(!insight)}>
+              <Icon name="timer" size={15} />Data di scene
+            </button>
           )}
           {wants3d && (
             <button type="button" className="button compact" aria-pressed={camera.walk} disabled={mode !== 'ready'}

@@ -2,6 +2,7 @@ import { createAgents } from './agents';
 import { createAudio } from './audio';
 import { createControls } from './controls';
 import { createCrew } from './crew';
+import { createInsight } from './insight';
 import { createOverlay } from './overlay';
 import { createPeople } from './people';
 import { slowWatch } from './pure';
@@ -29,6 +30,8 @@ export type SceneView = {
   walk: boolean;
   /** Ambient sound from public/audio; off until the viewer turns it on. */
   sound: boolean;
+  /** Wait chips, queue heatmap and the walk-mode look-at card. */
+  insight: boolean;
   waiting: SceneCustomer[];
   serving: (SceneCustomer | null)[];
 };
@@ -44,6 +47,7 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
   const crew = createCrew(s, people, room);
   const overlay = createOverlay(s);
   const agents = createAgents(s, people, audio.shot);
+  const insight = createInsight(s, agents.list);
   let last: SceneView | null = null, C = 0;
   const controls = createControls(s, room.setWalk, () => last);
 
@@ -54,6 +58,7 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
     audio.sync(view.sound);
     view.serving.forEach((u, i) => { crew.setBusy(i, !!u); overlay.setBusy(i, !!u); });
     agents.sync(view);
+    insight.sync(view);
   }
 
   const tooSlow = slowWatch();
@@ -72,6 +77,7 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
     room.frame(now, dt, walking);
     audio.frame(dt, walking, controls.tgt, walkers, agents.chairs);
     overlay.frame();
+    insight.frame(dt, walking);
     s.renderer.render(s.scene, s.camera);
   }
   raf = requestAnimationFrame(frame);
@@ -85,6 +91,7 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
       crew.dispose();
       agents.dispose();
       overlay.dispose();
+      insight.dispose();
       s.dispose();
     },
   };

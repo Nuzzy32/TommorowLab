@@ -169,7 +169,8 @@ export function createAgents({ reduced, world, T }: Stage, { person, customerLoo
       const want = wanted(view.waiting, view.serving);
       want.forEach((w, id) => {
         const a = agents.get(id) ?? spawn(w.u);
-        a.u = w.u;
+        // Service entries carry no arrival time; keep the one seen while the customer was waiting.
+        a.u = { ...w.u, arrivedAt: w.u.arrivedAt ?? a.u.arrivedAt };
         if (a.leaving) return;
         if (w.st === 'w') {
           if (w.k < a.laneEnd) { for (let j = a.laneEnd - 1; j >= w.k; j--) a.path.push(N(SLOT(j))); a.laneEnd = w.k; }
