@@ -84,10 +84,11 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
   const servers = projection?.servers ?? Array.from({ length: c }, (_, ordinal) => ({ ordinal, busyCustomerId: null as string | null, departureAt: null as number | null }));
   const counts = projection?.counts;
   const waiting = projection?.waitingSample ?? [];
-  const customer = (id: string) => ({ id, manual: id.startsWith('m:') });
+  const customer = (id: string, arrivedAt?: number) => ({ id, manual: id.startsWith('m:'), arrivedAt });
   const view: SceneView = {
     c: servers.length, live: projection !== null, runKey: projection?.runId ?? 'draft', speed, ...camera, sound,
-    waiting: waiting.slice(0, SCENE_SHOWN).map(customer),
+    clock: projection?.simTimeSec ?? 0, horizon: projection?.configSnapshot.horizonSec ?? 0,
+    waiting: waiting.slice(0, SCENE_SHOWN).map((id, k) => customer(id, projection?.waitingArrivedAt[k])),
     serving: servers.map(server => (server.busyCustomerId ? customer(server.busyCustomerId) : null)),
   };
   const latest = useRef(view);

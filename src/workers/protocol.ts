@@ -47,6 +47,8 @@ export type Projection = Omit<Snapshot, 'customers' | 'waitingCustomerIds'> & {
   fastMode: boolean;
   pauseReason: PauseReason | null;
   waitingSample: string[];
+  /** Arrival time (sim seconds) of each id in `waitingSample`, same order. */
+  waitingArrivedAt: number[];
   summarizedWaiting: number;
   queuePeaks: QueuePeaks;
 };
@@ -157,8 +159,9 @@ export function project(snapshot: Snapshot, runId: string, fastMode: boolean, pa
   const { customers, waitingCustomerIds, ...rest } = snapshot;
   const busy = snapshot.servers.filter(server => server.busyCustomerId !== null).length;
   const waitingSample = waitingCustomerIds.slice(0, Math.max(0, AVATAR_LIMIT - busy));
+  const arrivedAt = new Map(customers.map(c => [c.id, c.arrivalAt]));
   return {
-    ...rest, runId, fastMode, pauseReason, waitingSample, summarizedWaiting: waitingCustomerIds.length - waitingSample.length,
+    ...rest, runId, fastMode, pauseReason, waitingSample, waitingArrivedAt: waitingSample.map(id => arrivedAt.get(id) ?? 0), summarizedWaiting: waitingCustomerIds.length - waitingSample.length,
     queuePeaks: queuePeaks(customers, snapshot.configSnapshot.horizonSec, snapshot.simTimeSec),
   };
 }
