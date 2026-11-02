@@ -39,13 +39,15 @@ Tes `perf.spec.ts` hanya memakai batas longgar (pause < 2 s, batch < 10 s, beban
 
 ## Checklist terbuka (butuh manusia atau perangkat nyata)
 
+Protokol dan lembar catat untuk setiap baris ada di [manual-test-kit.md](manual-test-kit.md) (30 Oktober).
+
 | Item | Acuan | Status |
 |---|---|---|
-| Safari dan Edge asli (bukan engine Playwright); Firefox dengan GPU | NFR browser, M5 | Belum |
-| Perangkat acuan: laptop kelas menengah dan HP Android menengah; FPS scene, latensi pause ≤ 500 ms, batch | NFR-02/04, ARCHITECTURE §14 | Belum |
-| Screen reader: VoiceOver (Safari) dan NVDA (Firefox/Chrome), alur run, tambah pelanggan, hasil, A/B, simpan | DS-QA, M5 | Belum |
+| Safari dan Edge asli (bukan engine Playwright); Firefox dengan GPU | NFR browser, M5 | Belum · kit §2 |
+| Perangkat acuan: laptop kelas menengah dan HP Android menengah; FPS scene, latensi pause ≤ 500 ms, batch | NFR-02/04, ARCHITECTURE §14 | Belum · kit §5, skrip `tests/manual/ukur-perangkat.js` |
+| Screen reader: VoiceOver (Safari) dan NVDA (Firefox/Chrome), alur run, tambah pelanggan, hasil, A/B, simpan | DS-QA, M5 | Belum · kit §3 |
 | Zoom browser 200% dan teks 200% pada perangkat nyata (otomatis hanya mensimulasikan 640 px) | WCAG 1.4.4/1.4.10 | Sebagian |
-| `prefers-reduced-motion` dan `prefers-reduced-transparency` diperiksa visual | DS §3.7 | Belum |
-| Uji tugas formatif ±5 peserta (G-01/G-02 PRD) | M5 | Belum dijadwalkan |
-| Mode privat Safari (kuota localStorage), Firefox dengan Web Locks dimatikan | FR-23 | Belum |
+| `prefers-reduced-motion` dan `prefers-reduced-transparency` diperiksa visual | DS §3.7 | Sebagian: reaksi CSS otomatis (`preferences.spec.ts`; reduced transparency kini membuat panel padat tanpa blur, axe kontras lulus tanpa override); visual · kit §4 |
+| Uji tugas formatif ±5 peserta (G-01/G-02 PRD) | M5 | Belum dijadwalkan · kit §7 |
+| Mode privat Safari (kuota localStorage), Firefox dengan Web Locks dimatikan | FR-23 | Sebagian: write ditolak dan tanpa Web Locks disimulasikan di 3 engine (`workspace.spec.ts`); browser asli · kit §6 |
 | Host HTTPS produksi: worker MIME, base path, cache | WP-11 | Belum (hosting belum dipilih) |

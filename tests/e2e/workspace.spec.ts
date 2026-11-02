@@ -480,6 +480,48 @@ test('FR-23 corrupt records stay listed but unloadable, and a blocked storage ke
   await blocked.close();
 });
 
+// Older Safari private windows (and full disks) let reads succeed but throw QuotaExceededError on every write.
+test('FR-23 a storage that refuses writes keeps the save dialog and draft, and the run unaffected', async ({ page }) => {
+  await page.addInitScript(() => {
+    Storage.prototype.setItem = function () { throw new DOMException('quota', 'QuotaExceededError'); };
+  });
+  await open(page);
+  await setField(page, 'Seed percobaan', '77');
+  await page.getByRole('button', { name: 'Tersimpan' }).click();
+  await drawer(page).getByRole('button', { name: 'Simpan konfigurasi' }).click();
+  const save = page.getByRole('dialog', { name: 'Simpan konfigurasi' });
+  await save.getByRole('textbox', { name: 'Nama' }).fill('Privat');
+  await save.getByRole('button', { name: 'Simpan' }).click();
+  await expect(save.getByRole('alert')).toHaveText('Konfigurasi belum tersimpan; browser menolak penyimpanan.');
+  await expect(save.getByRole('textbox', { name: 'Nama' })).toHaveValue('Privat');
+  await save.getByRole('button', { name: 'Batal' }).click();
+  await expect(drawer(page)).toContainText('Belum ada konfigurasi tersimpan');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('textbox', { name: 'Seed percobaan', exact: true })).toHaveValue('77');
+  await primary(page).click();
+  await expect(status(page)).toContainText('Berjalan');
+  // The "help seen" preference could not be written either, so help simply returns on the next visit.
+  await page.reload();
+  await expect(page.getByRole('dialog', { name: 'Jalankan percobaan' })).toBeVisible();
+});
+
+test('FR-23 without Web Locks saved slots still load, while save and delete are disabled with a reason', async ({ page }) => {
+  await page.addInitScript(([raw]) => {
+    delete (Navigator.prototype as { locks?: unknown }).locks;
+    localStorage.setItem('tomorrowlab:scenario:kept', raw);
+  }, [record('kept', 'Tanpa kunci', 3)] as const);
+  await open(page);
+  await page.getByRole('button', { name: 'Tersimpan' }).click();
+  await expect(drawer(page)).toContainText('Browser ini tidak mendukung Web Locks, jadi menyimpan dan menghapus dinonaktifkan.');
+  await expect(drawer(page).getByRole('button', { name: 'Simpan konfigurasi' })).toBeDisabled();
+  await expect(drawer(page).getByRole('button', { name: 'Hapus Tanpa kunci' })).toBeDisabled();
+  await drawer(page).getByRole('button', { name: 'Muat Tanpa kunci' }).click();
+  await page.getByRole('dialog', { name: 'Muat konfigurasi “Tanpa kunci”?' }).getByRole('button', { name: 'Muat konfigurasi' }).click();
+  await expect(page.getByRole('textbox', { name: 'Loket aktif', exact: true })).toHaveValue('3');
+  await primary(page).click();
+  await expect(status(page)).toContainText('Berjalan');
+});
+
 test('a delete confirmed after another tab changed the slot is refused as a conflict', async ({ page, context }) => {
   await page.addInitScript(([raw]) => {
     if (!localStorage.getItem('seeded')) { localStorage.setItem('seeded', '1'); localStorage.setItem('tomorrowlab:scenario:shared', raw); }

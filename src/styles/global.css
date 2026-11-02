@@ -69,6 +69,13 @@
   :root { --tl-motion-fast: 0ms; --tl-motion-normal: 0ms; --tl-motion-overlay: 0ms; }
 }
 
+/* OS "reduce transparency": solid panels on a plain canvas, no blur; contrast no longer depends on what is behind. */
+@media (prefers-reduced-transparency: reduce) {
+  :root { --tl-color-glass: #f8fbf9; --tl-color-card: var(--tl-color-surface); --tl-glass-blur: none; }
+  .backdrop { display: none; }
+  .done-banner { background: var(--tl-color-surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
 * { box-sizing: border-box; }
 body { margin: 0; min-height: 100vh; background: var(--tl-color-canvas); line-height: 1.5; }
 h1, h2, h3, p { margin: 0; }
