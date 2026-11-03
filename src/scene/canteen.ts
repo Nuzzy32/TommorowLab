@@ -7,6 +7,7 @@ import { createOverlay } from './overlay';
 import { createPeople } from './people';
 import { slowWatch } from './pure';
 import type { SceneCustomer } from './pure';
+import type { Leftover } from './crowd';
 import { createRoom } from './room';
 import { createSky } from './sky';
 import { createStage } from './stage';
@@ -48,9 +49,11 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
   const people = createPeople(s);
   const room = createRoom(s, people.mats);
   const audio = createAudio(s);
-  const crew = createCrew(s, people, room);
+  // Trays diners leave on tables: agents add them, the cleaner clears them.
+  const leftovers: Leftover[] = [];
+  const crew = createCrew(s, people, room, leftovers);
   const overlay = createOverlay(s);
-  const agents = createAgents(s, people, audio.shot);
+  const agents = createAgents(s, people, audio.shot, leftovers);
   const insight = createInsight(s, agents.list);
   let last: SceneView | null = null, C = 0;
   const controls = createControls(s, room.setWalk, () => last);

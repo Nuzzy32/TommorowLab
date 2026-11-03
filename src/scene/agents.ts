@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { D2, ENTRY, FY, HEAD, N, SCENE_AVATAR_LIMIT, SEAT_DROP, SLOT, counterXs, diningChairs, glance, pick, pose, stepTo, texting, wanted } from './pure';
 import type { Chair, Fig, Node, SceneCustomer } from './pure';
 import type { Audio } from './audio';
+import { LEAVE_TRAY, blocked, joinGroup, pickChair, sidestep, trimLeftovers } from './crowd';
+import type { Group, Leftover } from './crowd';
 import type { People } from './people';
 import type { Stage } from './stage';
 
@@ -11,23 +13,28 @@ export type Agent = {
   stage: 'queue' | 'serve' | 'dine' | 'eat' | 'exit'; counter: number; wait: number; ph: number;
   leaving?: boolean; chair?: Chair; tray?: THREE.Group | null; food?: THREE.Mesh;
   eatT?: number; eatDur?: number; fading?: number; fade?: THREE.Material[];
+  group?: number | null; stuck?: number;
 };
 type View = { speed: number; runKey: string; live: boolean; waiting: SceneCustomer[]; serving: (SceneCustomer | null)[] };
 
 // Customers: walk in, queue along the lane, get served, carry the meal to a free chair, eat, chat, and leave.
 // Visual only: the scene mirrors which ids the engine has waiting or in service and never feeds back.
-export function createAgents({ reduced, world, T }: Stage, { person, customerLook, mats }: People, shot: Audio['shot']) {
+// `leftovers` is shared with the cleaner: trays diners left on tables, oldest first.
+export function createAgents({ reduced, world, T }: Stage, { person, customerLook, mats }: People, shot: Audio['shot'], leftovers: Leftover[]) {
   const gTag = T(new THREE.SphereGeometry(0.075, 10, 8));
   const gPlate = T(new THREE.CylinderGeometry(0.2, 0.17, 0.03, 20)), gFood = T(new THREE.SphereGeometry(0.12, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2)), gCup = T(new THREE.CylinderGeometry(0.05, 0.045, 0.13, 12));
   const agents = new Map<string, Agent>(), chairs = diningChairs();
-  let xs: number[] = [], runKey: string | null = null, speedMul = 1;
+  const groups: Group[] = [];
+  let xs: number[] = [], runKey: string | null = null, speedMul = 1, arriving = 0;
 
   function spawn(u: SceneCustomer) {
-    const j = (Math.random() - 0.5) * 1.6;
-    const f = person(world, customerLook(), -4.5 + j, D2 + 1.4, Math.PI);
+    // People who show up in the same update wait their turn outside the door, four abreast, instead of entering as one blob.
+    const j = arriving ? (arriving % 4 - 1.5) * 0.75 : (Math.random() - 0.5) * 1.6;
+    const f = person(world, customerLook(), -4.5 + j, D2 + 1.4 + Math.floor(arriving / 4) * 0.55, Math.PI);
     f.g.scale.set(0.92 + Math.random() * 0.18, 0.94 + Math.random() * 0.12, 0.92 + Math.random() * 0.18);
     if (u.manual) { const t = new THREE.Mesh(gTag, mats.tag); t.position.y = FY + 1.36; f.g.add(t); }
-    const a: Agent = { u, f, path: [N([-4.5 + j * 0.6, 6.6]), N(ENTRY)], laneEnd: SCENE_AVATAR_LIMIT, stage: 'queue', counter: 0, wait: 0, ph: Math.random() * 6 };
+    const a: Agent = { u, f, path: [N([-4.5 + j * 0.6, 6.6]), N(ENTRY)], laneEnd: SCENE_AVATAR_LIMIT, stage: 'queue', counter: 0, wait: 0, ph: Math.random() * 6, group: joinGroup(groups, u.arrivedAt) };
+    a.wait = arriving++ * 0.25;
     agents.set(u.id, a);
     return a;
   }
@@ -51,9 +58,10 @@ export function createAgents({ reduced, world, T }: Stage, { person, customerLoo
     const cx = xs[a.counter] ?? 0;
     a.path.push(N([cx, -4.35], { wait: 0.6, face: Math.PI, fn: () => { a.stage = 'dine'; takeTray(a); } }));
     a.path.push(N([cx, -3.4]), N([6.7, -3.65]), N([7.9, -3.65]));
-    const free = chairs.filter(c => !c.busy);
-    if (!free.length) { a.path.push(...exitPath(a, null)); return; }
-    const ch = free[Math.floor(Math.random() * free.length)];
+    // Friends who came in together sit at the same table when there is room.
+    const mates = [...agents.values()].filter(m => m !== a && m.group != null && m.group === a.group && m.chair).map(m => m.chair!);
+    const ch = pickChair(chairs, mates);
+    if (!ch) { a.path.push(...exitPath(a, null)); return; }
     ch.busy = true;
     a.chair = ch;
     a.path.push(N([7.9, ch.aisle]), N([ch.x, ch.aisle]), N([ch.x, ch.z], { face: ch.s < 0 ? 0 : Math.PI, fn: () => sit(a) }));
@@ -86,8 +94,14 @@ export function createAgents({ reduced, world, T }: Stage, { person, customerLoo
   function stand(a: Agent) {
     a.stage = 'exit';
     a.f.head.position.y = HEAD;
-    if (a.tray) { world.remove(a.tray); a.tray = null; }
-    const aisle = a.chair!.aisle;
+    const ch = a.chair!;
+    // Some diners leave the tray for the cleaner; the oldest trays go once too many pile up.
+    if (a.tray && Math.random() < LEAVE_TRAY) {
+      leftovers.push({ tray: a.tray, x: ch.x, aisle: ch.aisle, face: ch.s < 0 ? 0 : Math.PI });
+      trimLeftovers(leftovers).forEach(l => l.tray.removeFromParent());
+    } else if (a.tray) world.remove(a.tray);
+    a.tray = null;
+    const aisle = ch.aisle;
     a.chair!.busy = false;
     a.path = exitPath(a, aisle);
   }
@@ -98,10 +112,14 @@ export function createAgents({ reduced, world, T }: Stage, { person, customerLoo
     a.fade?.forEach(m => m.dispose());
     agents.delete(id);
   }
-  function clearAll() { [...agents].forEach(([id, a]) => remove(id, a)); chairs.forEach(c => { c.busy = false; }); }
+  function clearAll() {
+    [...agents].forEach(([id, a]) => remove(id, a));
+    chairs.forEach(c => { c.busy = false; });
+    leftovers.splice(0).forEach(l => l.tray.removeFromParent());
+  }
 
-  // One customer for one frame; true while they are walking.
-  function step(a: Agent, id: string, dt: number, now: number) {
+  // One customer for one frame; true while they are walking. `queuers` are the queueing customers with their lane slot.
+  function step(a: Agent, id: string, dt: number, now: number, queuers: { p: THREE.Vector3; k: number }[]) {
     const p = a.f.g.position;
     if (a.fading != null) {
       a.fading += dt;
@@ -144,7 +162,17 @@ export function createAgents({ reduced, world, T }: Stage, { person, customerLoo
       let rem = Math.hypot(q.v.x - p.x, q.v.z - p.z);
       for (let i = 1; i < a.path.length; i++) rem += a.path[i - 1].v.distanceTo(a.path[i].v);
       const sp = reduced ? 1e4 : a.stage === 'dine' || a.stage === 'exit' ? 2.4 : Math.max(2.4, rem / (a.stage === 'serve' ? 2.2 : 3.2));
-      if (stepTo(a.f.g, q.v, sp * dt, dt)) {
+      // In the queue, wait for someone ahead in the engine's order instead of walking through them; whoever is ahead in
+      // that order may pass people behind them, and nobody is held for long, so the lane never jams.
+      const held = a.stage === 'queue' && (a.stuck ?? 0) < 2.5
+        && blocked(p, q.v.x - p.x, q.v.z - p.z, queuers.filter(o => o.k < a.laneEnd).map(o => o.p));
+      a.stuck = held ? (a.stuck ?? 0) + dt : 0;
+      if (!held && a.stage === 'queue' && !reduced) {
+        const [ox, oz] = sidestep(p, q.v.x - p.x, q.v.z - p.z, queuers.filter(o => o.p !== p).map(o => o.p));
+        p.x += ox;
+        p.z += oz;
+      }
+      if (held) { /* stand still this frame */ } else if (stepTo(a.f.g, q.v, sp * dt, dt)) {
         a.path.shift();
         if (q.face != null) a.f.g.rotation.y = q.face;
         if (q.wait) a.wait = q.wait;
@@ -167,6 +195,7 @@ export function createAgents({ reduced, world, T }: Stage, { person, customerLoo
       if (view.runKey !== runKey) { clearAll(); runKey = view.runKey; }
       if (!view.live) { clearAll(); return; }
       const want = wanted(view.waiting, view.serving);
+      arriving = 0;
       want.forEach((w, id) => {
         const a = agents.get(id) ?? spawn(w.u);
         // Service entries carry no arrival time; keep the one seen while the customer was waiting.
@@ -181,7 +210,9 @@ export function createAgents({ reduced, world, T }: Stage, { person, customerLoo
     // Returns how many customers are walking this frame.
     frame(dt: number, now: number) {
       let walkers = 0;
-      agents.forEach((a, id) => { if (step(a, id, dt, now)) walkers++; });
+      const queuers: { p: THREE.Vector3; k: number }[] = [];
+      agents.forEach(a => { if (a.stage === 'queue' && a.fading == null) queuers.push({ p: a.f.g.position, k: a.laneEnd }); });
+      agents.forEach((a, id) => { if (step(a, id, dt, now, queuers)) walkers++; });
       return walkers;
     },
     dispose() { agents.forEach(a => a.fade?.forEach(m => m.dispose())); },

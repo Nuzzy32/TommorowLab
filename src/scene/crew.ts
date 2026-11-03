@@ -1,14 +1,17 @@
 import * as THREE from 'three';
 import { D2, FY, N, SEAT_DROP, counterXs, glance, pick, pose, stepTo, texting } from './pure';
 import type { Fig, Node } from './pure';
+import { detour } from './crowd';
+import type { Leftover } from './crowd';
 import type { Look, People } from './people';
 import type { Stage } from './stage';
 
 // Staff loop over `route`; `busy` undefined means they work only while paused at a stop.
-type Crew = { f: Fig; route: Node[]; i: number; wait: number; ph: number; busy?: boolean; seated?: boolean; texting?: boolean; tool?: THREE.Object3D; load?: THREE.Object3D };
+type Crew = { f: Fig; route: Node[]; i: number; wait: number; ph: number; busy?: boolean; seated?: boolean; texting?: boolean; tool?: THREE.Object3D; load?: THREE.Object3D; detour?: Node[] };
 
 // Staff and the counters they work at: cooks, a store hand, a cleaner, a driver outside and one server per counter.
-export function createCrew({ reduced, world, T, M, box }: Stage, { person, mats, crewM, skins, pants, hairs, hijabs }: People, { dark, crate }: { dark: THREE.Material; crate: THREE.Material }) {
+// `leftovers` are trays diners left on tables (filled by agents.ts); the cleaner takes them to the rack.
+export function createCrew({ reduced, world, T, M, box }: Stage, { person, mats, crewM, skins, pants, hairs, hijabs }: People, { dark, crate }: { dark: THREE.Material; crate: THREE.Material }, leftovers: Leftover[]) {
   let counters = new THREE.Group(), paints: { body: THREE.MeshStandardMaterial; strip: THREE.MeshStandardMaterial }[] = [];
   world.add(counters);
   const glass = M('#FFFFFF', { transparent: true, opacity: 0.32, roughness: 0.05, depthWrite: false });
@@ -20,7 +23,7 @@ export function createCrew({ reduced, world, T, M, box }: Stage, { person, mats,
     const { x, z } = route[0].v;
     return { f: person(parent, k, x, z, route[0].face ?? 0), route, i: 0, wait: 0, ph: Math.random() * 6, ...extra };
   };
-  let servers: Crew[] = [];
+  let servers: Crew[] = [], cleaner: Crew;
   const crew: Crew[] = [
     staff(kitchen(), [N([-3.6, -7.7], { face: Math.PI, wait: Infinity })], { busy: true }),
     staff(kitchen(), [N([3.0, -7.7], { face: Math.PI, wait: Infinity })], { busy: true }),
@@ -48,17 +51,37 @@ export function createCrew({ reduced, world, T, M, box }: Stage, { person, mats,
     const ojol = staff({ shirt: M('#1F9D55', { roughness: 0.7 }), pants: crewM.slacks, skin: pick(skins), hat: 'hard', hatMat: M('#1F9D55', { roughness: 0.4 }), phone: true },
       [N([1.9, D2 + 2.35], { face: -2.6, wait: Infinity })], { busy: false, texting: true });
     crew.push(w, c, ojol);
+    cleaner = c;
   }
 
+  // Send the cleaner for the oldest unclaimed tray: pick it up at the table, carry it to the rack, then resume mopping.
+  function fetchTray(l: Leftover) {
+    l.claimed = true;
+    const [toAisle, table, back, toRack, rack, fromRack] = detour(l);
+    cleaner.wait = 0;
+    cleaner.detour = [N(toAisle), N(table, { face: l.face, wait: 1.2, fn: () => {
+      const i = leftovers.indexOf(l);
+      if (i >= 0) leftovers.splice(i, 1);
+      l.tray.position.set(0, FY + 0.78, 0.34);
+      cleaner.f.g.add(l.tray);
+      cleaner.load = l.tray;
+      if (cleaner.tool) cleaner.tool.visible = false;
+    } }), N(back), N(toRack), N(rack, { face: Math.PI / 2, wait: 1.0, fn: () => {
+      l.tray.removeFromParent();
+      cleaner.load = undefined;
+      if (cleaner.tool) cleaner.tool.visible = true;
+    } }), N(fromRack)];
+  }
   function tick(w: Crew, dt: number) {
-    const q = w.route[w.i];
+    const q = w.detour?.length ? w.detour[0] : w.route[w.i];
     let walk: number | null = null;
     if (w.wait > 0) w.wait -= dt;
-    else if (stepTo(w.f.g, q.v, reduced ? 1e4 : 1.2 * dt, dt)) {
+    else if (stepTo(w.f.g, q.v, reduced ? 1e4 : (w.detour?.length ? 1.6 : 1.2) * dt, dt)) {
       if (q.face != null) w.f.g.rotation.y = q.face;
       w.wait = q.wait ?? 0;
       q.fn?.();
-      w.i = (w.i + 1) % w.route.length;
+      if (w.detour?.length) w.detour.shift();
+      else w.i = (w.i + 1) % w.route.length;
     } else walk = w.ph += dt * 9;
     if (walk == null) w.ph += dt * 5;
     const working = w.busy ?? w.wait > 0, wob = reduced ? 0 : Math.sin(w.ph);
@@ -115,6 +138,7 @@ export function createCrew({ reduced, world, T, M, box }: Stage, { person, mats,
     },
     // Returns how many of the fixed crew are walking (servers stand behind their counters).
     frame(dt: number) {
+      if (!cleaner.detour?.length) { const l = leftovers.find(x => !x.claimed); if (l) fetchTray(l); }
       let walkers = 0;
       crew.forEach(w => { if (tick(w, dt)) walkers++; });
       servers.forEach(w => tick(w, dt));
