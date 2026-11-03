@@ -8,6 +8,7 @@ import { createPeople } from './people';
 import { slowWatch } from './pure';
 import type { SceneCustomer } from './pure';
 import { createRoom } from './room';
+import { createSky } from './sky';
 import { createStage } from './stage';
 
 // Visual-only canteen. Layout, walking, chairs and eating never feed back into the model;
@@ -23,6 +24,8 @@ export type SceneView = {
   /** Sim time in seconds, and the run's arrival horizon; 0 before a run starts. */
   clock: number;
   horizon: number;
+  /** The run has finished; daylight turns to evening. */
+  done: boolean;
   rot: number;
   zoom: number;
   resetNonce: number;
@@ -41,6 +44,7 @@ export type CanteenScene = { update(view: SceneView): void; dispose(): void };
 export function createCanteen(host: HTMLElement, onContextLost: () => void, onTooSlow: (() => void) | null = null): CanteenScene {
   // Creation order is draw order: lights and world, the building, the counters group, then the people.
   const s = createStage(host, onContextLost);
+  const sky = createSky(s);
   const people = createPeople(s);
   const room = createRoom(s, people.mats);
   const audio = createAudio(s);
@@ -56,6 +60,7 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
     // Agents clear first so their chairs are free before the counter row is rebuilt.
     if (view.c !== C) { C = view.c; agents.setCounters(C); crew.setCounters(C); overlay.setCounters(C); }
     audio.sync(view.sound);
+    sky.sync(view);
     view.serving.forEach((u, i) => { crew.setBusy(i, !!u); overlay.setBusy(i, !!u); });
     agents.sync(view);
     insight.sync(view);
@@ -73,6 +78,7 @@ export function createCanteen(host: HTMLElement, onContextLost: () => void, onTo
     if (onTooSlow && !wasHidden && tooSlow(gap)) { const notify = onTooSlow; onTooSlow = null; notify(); }
     wasHidden = false;
     const walking = controls.frame(dt);
+    sky.frame(dt);
     const walkers = agents.frame(dt, now) + crew.frame(dt);
     room.frame(now, dt, walking);
     audio.frame(dt, walking, controls.tgt, walkers, agents.chairs);

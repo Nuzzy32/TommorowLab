@@ -88,7 +88,7 @@ export const SceneBox = memo(function SceneBox({ c, status, projection, speed }:
   const customer = (id: string, arrivedAt?: number) => ({ id, manual: id.startsWith('m:'), arrivedAt });
   const view: SceneView = {
     c: servers.length, live: projection !== null, runKey: projection?.runId ?? 'draft', speed, ...camera, sound, insight,
-    clock: projection?.simTimeSec ?? 0, horizon: projection?.configSnapshot.horizonSec ?? 0,
+    clock: projection?.simTimeSec ?? 0, horizon: projection?.configSnapshot.horizonSec ?? 0, done: status === 'COMPLETED',
     waiting: waiting.slice(0, SCENE_SHOWN).map((id, k) => customer(id, projection?.waitingArrivedAt[k])),
     serving: servers.map(server => (server.busyCustomerId ? customer(server.busyCustomerId) : null)),
   };
